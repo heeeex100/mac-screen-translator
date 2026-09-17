@@ -1,32 +1,60 @@
 import AppKit
 
-final class SelectionOverlay: NSWindow {
+/// 覆盖目标屏幕的透明框选面板。
+/// `.nonactivatingPanel` 可避免开始截图时切换到主窗口所在的桌面空间。
+final class SelectionOverlay: NSPanel {
     private var completion: ((NSRect) -> Void)?
+    private var onDismiss: (() -> Void)?
 
-    static func present(on screen: NSScreen, completion: @escaping (NSRect) -> Void) {
-        let window = SelectionOverlay(screen: screen, completion: completion)
+    @discardableResult
+    static func present(
+        on screen: NSScreen,
+        completion: @escaping (NSRect) -> Void,
+        onDismiss: @escaping () -> Void
+    ) -> SelectionOverlay {
+        let window = SelectionOverlay(screen: screen, completion: completion, onDismiss: onDismiss)
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        return window
     }
 
-    init(screen: NSScreen, completion: @escaping (NSRect) -> Void) {
+    init(screen: NSScreen, completion: @escaping (NSRect) -> Void, onDismiss: @escaping () -> Void) {
         self.completion = completion
-        super.init(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        self.onDismiss = onDismiss
+        super.init(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
         isOpaque = false
         backgroundColor = .clear
         level = .screenSaver
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = false
         contentView = SelectionView { [weak self] rect in
             guard let self else { return }
-            self.orderOut(nil)
-            self.completion?(rect)
+            // 隐藏遮罩后给 WindowServer 留一个合成周期；立即截图会把半透明遮罩也截进去，
+            // 从而降低 OCR 的识别率。
+            let completion = self.completion
             self.completion = nil
+            self.orderOut(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.onDismiss?()
+                self?.onDismiss = nil
+                completion?(rect)
+            }
         }
     }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) {
         orderOut(nil)
         completion = nil
+        onDismiss?()
+        onDismiss = nil
     }
 }
 

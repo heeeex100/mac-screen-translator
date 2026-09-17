@@ -8,6 +8,7 @@ struct MacScreenTranslatorApp: App {
         WindowGroup("截图翻译器") {
             ContentView()
                 .environmentObject(appDelegate.store)
+                .environmentObject(appDelegate.visibilityController)
         }
         .windowResizability(.contentSize)
     }
