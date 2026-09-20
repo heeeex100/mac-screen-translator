@@ -5,11 +5,7 @@ struct MacScreenTranslatorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("截图翻译器") {
-            ContentView()
-                .environmentObject(appDelegate.store)
-                .environmentObject(appDelegate.visibilityController)
-        }
-        .windowResizability(.contentSize)
+        // 主窗口由 AppVisibilityController 管理，避免关闭后失去窗口引用。
+        Settings { EmptyView() }
     }
 }

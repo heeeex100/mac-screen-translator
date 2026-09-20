@@ -5,35 +5,55 @@ import SwiftUI
 
 extension Notification.Name {
     static let captureHotkeyChanged = Notification.Name("captureHotkeyChanged")
+    static let clipboardHotkeyChanged = Notification.Name("clipboardHotkeyChanged")
     static let openTranslationSettings = Notification.Name("openTranslationSettings")
     static let translationCompleted = Notification.Name("translationCompleted")
+    static let ocrCompleted = Notification.Name("ocrCompleted")
+    static let openAccessibilitySettings = Notification.Name("openAccessibilitySettings")
+}
+
+enum TranslationState: Equatable {
+    case idle
+    case recognizing
+    case translating
+    case succeeded
+    case failed
+    case cancelled
+}
+
+struct OCRDisplayResult {
+    let text: String
+}
+
+struct LearningNote: Equatable {
+    let summary: String
+    let keyPoints: String
+    let words: String
 }
 
 /// 保存界面状态，并串联截图、Vision OCR 和 DeepSeek 翻译三个阶段。
+@MainActor
 final class TranslationStore: ObservableObject {
     @Published var source = ""
     @Published var translation = ""
+    @Published var learningNote: LearningNote?
+    @Published var isLoadingLearningNote = false
     @Published var status = "准备就绪。使用下方按钮或菜单栏快捷键框选翻译。"
     @Published var isTranslating = false
-    @Published var apiKey: String {
-        didSet {
-            guard apiKey != oldValue else { return }
-            do {
-                try KeychainStore.saveAPIKey(apiKey)
-                apiKeyStorageError = nil
-            } catch {
-                apiKeyStorageError = error.localizedDescription
-            }
-        }
-    }
+    @Published var apiKey: String
     @Published var apiKeyStorageError: String?
+    @Published private(set) var state: TranslationState = .idle
 
     @AppStorage("deepseekModel") var model = "deepseek-flash"
     @AppStorage("targetLanguage") var targetLanguage = "中文（简体）"
+    @AppStorage("recognitionLanguage") var recognitionLanguage = "自动识别"
     @AppStorage("captureHotKeyCode") private var captureHotKeyCode = Int(kVK_ANSI_T)
     @AppStorage("captureHotKeyModifiers") private var captureHotKeyModifiers = Int(controlKey | shiftKey)
+    @AppStorage("clipboardHotKeyCode") private var clipboardHotKeyCode = Int(kVK_ANSI_V)
+    @AppStorage("clipboardHotKeyModifiers") private var clipboardHotKeyModifiers = Int(controlKey | shiftKey)
 
     init() {
+        AppLogger.shared.info("应用启动")
         // 首次升级时，把旧版本 UserDefaults 中的明文 Key 一次性迁移到钥匙串。
         let legacyKey = UserDefaults.standard.string(forKey: "deepseekAPIKey") ?? ""
         do {
@@ -63,6 +83,31 @@ final class TranslationStore: ObservableObject {
         (UInt32(captureHotKeyCode), UInt32(captureHotKeyModifiers))
     }
 
+    var clipboardShortcutTitle: String {
+        ShortcutFormatter.title(keyCode: UInt32(clipboardHotKeyCode), modifiers: UInt32(clipboardHotKeyModifiers))
+    }
+
+    var clipboardShortcut: (keyCode: UInt32, modifiers: UInt32) {
+        (UInt32(clipboardHotKeyCode), UInt32(clipboardHotKeyModifiers))
+    }
+
+    func saveAPIKey() {
+        do {
+            try KeychainStore.saveAPIKey(apiKey)
+            apiKeyStorageError = nil
+            AppLogger.shared.info("API Key 已保存（长度：\(apiKey.count)）")
+        } catch {
+            apiKeyStorageError = error.localizedDescription
+            AppLogger.shared.error("保存 API Key 失败：\(error.localizedDescription)")
+        }
+    }
+
+    var logFileURL: URL { AppLogger.shared.fileURL }
+
+    func openLogFile() {
+        AppLogger.shared.openInFinder()
+    }
+
     func setCaptureShortcut(keyCode: UInt32, modifiers: UInt32) {
         captureHotKeyCode = Int(keyCode)
         captureHotKeyModifiers = Int(modifiers)
@@ -70,31 +115,130 @@ final class TranslationStore: ObservableObject {
         NotificationCenter.default.post(name: .captureHotkeyChanged, object: nil)
     }
 
+    func setClipboardShortcut(keyCode: UInt32, modifiers: UInt32) {
+        clipboardHotKeyCode = Int(keyCode)
+        clipboardHotKeyModifiers = Int(modifiers)
+        objectWillChange.send()
+        NotificationCenter.default.post(name: .clipboardHotkeyChanged, object: nil)
+    }
+
     func translate(selection: NSRect, on screen: NSScreen) {
-        guard let image = screenshot(selection: selection, screen: screen) else { status = "截图失败，请在系统设置中允许屏幕录制。"; return }
+        guard let image = screenshot(selection: selection, screen: screen) else { fail("截图失败，请在系统设置中允许屏幕录制。"); return }
         source = ""
         translation = ""
-        isTranslating = true
+        learningNote = nil
+        beginRequest(.recognizing)
         status = "正在识别文字…"
-        // Vision 识别和网络请求不能阻塞 SwiftUI 主线程。
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let languages = recognitionLanguages()
+        let requestID = activeRequestID
+        activeTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let text = try self.recognize(image: image)
+                let text = try await Task.detached(priority: .userInitiated) {
+                    try Self.recognize(image: image, languages: languages)
+                }.value
+                guard !Task.isCancelled, self.activeRequestID == requestID else { return }
                 guard !text.isEmpty else { throw TranslationError.message("没有识别到文字。") }
-                DispatchQueue.main.async {
-                    self.source = text
-                    guard !self.apiKey.isEmpty else {
-                        self.status = "已识别原文；请先在设置中填写 DeepSeek API Key 以翻译。"
-                        self.isTranslating = false
-                        return
-                    }
-                    self.status = "正在使用 DeepSeek 翻译…"
-                    self.translateRecognizedText(text)
+                self.source = text
+                guard !self.apiKey.isEmpty else {
+                    self.status = "已识别原文；请先在设置中填写 DeepSeek API Key 以翻译。"
+                    self.isTranslating = false
+                    self.state = .idle
+                    return
                 }
+                guard self.activeRequestID == requestID else { return }
+                self.state = .translating
+                self.status = "正在翻译…"
+                try await self.translateRecognizedText(text, requestID: requestID)
+            } catch is CancellationError {
+                guard self.activeRequestID == requestID else { return }
+                self.cancelled()
             } catch {
-                DispatchQueue.main.async { self.status = error.localizedDescription; self.isTranslating = false }
+                guard self.activeRequestID == requestID else { return }
+                self.fail(error.localizedDescription)
             }
+        }
+    }
+
+    /// 通过辅助功能读取前台应用当前选中的文字；辅助功能不可用或没有选区时，
+    /// 模拟复制并从剪贴板读取，最后恢复调用前的剪贴板内容。
+    func translateSelectedText() {
+        guard !isTranslating else { return }
+        if let text = Self.selectedAccessibilityText() {
+            beginTextTranslation(text, status: "正在翻译选中文字…")
+            return
+        }
+        guard let text = Self.copySelectedTextFromClipboard() else {
+            status = "没有读取到选中文字，请先选择文字并授予辅助功能权限。"
+            NotificationCenter.default.post(name: .openAccessibilitySettings, object: nil)
+            return
+        }
+        beginTextTranslation(text, status: "正在翻译剪贴板中的选中文字…")
+    }
+
+    /// 只执行 OCR，不访问翻译服务，并自动把识别结果复制到剪贴板。
+    func recognize(selection: NSRect, on screen: NSScreen) {
+        guard !isTranslating else { return }
+        guard let image = screenshot(selection: selection, screen: screen) else {
+            fail("截图失败，请在系统设置中允许屏幕录制。")
+            return
+        }
+        source = ""
+        translation = ""
+        learningNote = nil
+        beginRequest(.recognizing)
+        status = "正在识别文字…"
+        let languages = recognitionLanguages()
+        let requestID = activeRequestID
+        activeTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let text = try await Task.detached(priority: .userInitiated) {
+                    try Self.recognize(image: image, languages: languages)
+                }.value
+                guard !Task.isCancelled, self.activeRequestID == requestID else { return }
+                guard !text.isEmpty else { throw TranslationError.message("没有识别到文字。") }
+                self.source = text
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                self.status = "OCR 完成，结果已复制"
+                self.isTranslating = false
+                self.state = .succeeded
+                NotificationCenter.default.post(name: .ocrCompleted, object: OCRDisplayResult(text: text))
+            } catch is CancellationError {
+                guard self.activeRequestID == requestID else { return }
+                self.cancelled()
+            } catch {
+                guard self.activeRequestID == requestID else { return }
+                self.fail(error.localizedDescription)
+            }
+        }
+    }
+
+    func translateInput(_ text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { status = "请输入要翻译的文字。"; return }
+        guard !isTranslating else { return }
+        beginTextTranslation(value, status: "正在翻译输入文字…")
+    }
+
+    private func beginTextTranslation(_ text: String, status: String) {
+        source = text
+        translation = ""
+        learningNote = nil
+        guard !apiKey.isEmpty else {
+            self.status = "已读取原文；请先在设置中填写 DeepSeek API Key。"
+            state = .idle
+            return
+        }
+        beginRequest(.translating)
+        self.status = status
+        let requestID = activeRequestID
+        activeTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await self.translateRecognizedText(text, requestID: requestID) }
+            catch is CancellationError { guard self.activeRequestID == requestID else { return }; self.cancelled() }
+            catch { guard self.activeRequestID == requestID else { return }; self.fail(error.localizedDescription) }
         }
     }
 
@@ -110,88 +254,333 @@ final class TranslationStore: ObservableObject {
 
         source = clipboardText
         translation = ""
+        learningNote = nil
 
         guard !apiKey.isEmpty else {
             status = "已读取剪贴板文字；请先在设置中填写 DeepSeek API Key。"
+            state = .idle
             return
         }
 
-        isTranslating = true
+        beginRequest(.translating)
         status = "正在翻译剪贴板文字…"
-        translateRecognizedText(clipboardText)
+        let requestID = activeRequestID
+        activeTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await self.translateRecognizedText(clipboardText, requestID: requestID) }
+            catch is CancellationError { guard self.activeRequestID == requestID else { return }; self.cancelled() }
+            catch { guard self.activeRequestID == requestID else { return }; self.fail(error.localizedDescription) }
+        }
     }
 
-    private func translateRecognizedText(_ text: String) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+    func cancelTranslation() {
+        activeTask?.cancel()
+        activeTask = nil
+        activeRequestID = UUID()
+        cancelled()
+    }
+
+    func retryLastTranslation() {
+        guard !isTranslating, let text = lastRequestText, !apiKey.isEmpty else { return }
+        beginRequest(.translating)
+        status = "正在重试…"
+        let requestID = activeRequestID
+        activeTask = Task { [weak self] in
             guard let self else { return }
+            do { try await self.translateRecognizedText(text, requestID: requestID) }
+            catch is CancellationError { guard self.activeRequestID == requestID else { return }; self.cancelled() }
+            catch { guard self.activeRequestID == requestID else { return }; self.fail(error.localizedDescription) }
+        }
+    }
+
+    private var activeTask: Task<Void, Never>?
+    private var lastRequestText: String?
+    private var activeRequestID = UUID()
+
+    private func beginRequest(_ newState: TranslationState) {
+        lastRequestText = nil
+        activeRequestID = UUID()
+        state = newState
+        isTranslating = newState == .recognizing || newState == .translating
+    }
+
+    private func cancelled() {
+        state = .cancelled
+        status = "请求已取消"
+        isTranslating = false
+        AppLogger.shared.info("翻译流程已取消")
+    }
+
+    private func fail(_ message: String) {
+        state = .failed
+        status = message
+        isTranslating = false
+        AppLogger.shared.error("翻译流程失败：\(message)")
+    }
+
+    private func translateRecognizedText(_ text: String, requestID: UUID) async throws {
+        lastRequestText = text
+        AppLogger.shared.info("开始翻译：原文长度 \(text.count)，模型 \(model)，目标语言 \(targetLanguage)")
+        let result = try await Self.callDeepSeek(text: text, apiKey: apiKey, model: model, targetLanguage: targetLanguage)
+        try Task.checkCancellation()
+        guard activeRequestID == requestID else { return }
+        translation = result
+        status = "翻译完成"
+        AppLogger.shared.info("翻译完成：译文长度 \(result.count)")
+        isTranslating = false
+        state = .succeeded
+        NotificationCenter.default.post(name: .translationCompleted,
+                                        object: TranslationDisplayResult(source: text, translation: result))
+    }
+
+    var canLearnCurrentText: Bool {
+        let words = source.split { $0 == " " || $0 == "\n" || $0 == "\t" }
+        let compact = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let basic = ["hello", "hi", "thanks", "thank you", "okay", "ok", "yes", "no", "好的", "谢谢", "你好"]
+        return compact.count >= 8 && words.count >= 4 && !basic.contains(compact.lowercased())
+    }
+
+    func loadLearningNote() {
+        guard canLearnCurrentText, !isLoadingLearningNote, !translation.isEmpty else { return }
+        guard !apiKey.isEmpty else { status = "请先在设置中填写 DeepSeek API Key。"; return }
+        isLoadingLearningNote = true
+        let text = source
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isLoadingLearningNote = false }
             do {
-                let result = try self.callDeepSeek(text: text)
-                DispatchQueue.main.async {
-                    self.translation = result
-                    self.status = "翻译完成"
-                    self.isTranslating = false
-                    NotificationCenter.default.post(
-                        name: .translationCompleted,
-                        object: TranslationDisplayResult(source: text, translation: result)
-                    )
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.status = error.localizedDescription
-                    self.isTranslating = false
-                }
+                self.learningNote = try await Self.callLearning(text: text, translation: translation, apiKey: self.apiKey, model: self.model)
             }
+            catch { self.status = error.localizedDescription }
         }
     }
 
     private func screenshot(selection: NSRect, screen: NSScreen) -> CGImage? {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               let image = CGDisplayCreateImage(CGDirectDisplayID(number.uint32Value)) else { return nil }
-        // NSView 坐标原点在左下角，CGImage 裁剪坐标原点在左上角；同时要换算 Retina 比例。
+        // 选区是面板内坐标，多屏时还要扣除屏幕的全局 origin；CGImage 原点在左上角，
+        // 同时换算 Retina 比例并限制在实际截图范围内，避免 crop 返回 nil。
+        let localSelection = selection.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY)
         let scale = CGFloat(image.width) / screen.frame.width
-        let crop = CGRect(x: selection.minX * scale,
-                          y: (screen.frame.height - selection.maxY) * scale,
-                          width: selection.width * scale, height: selection.height * scale).integral
+        let crop = CGRect(x: localSelection.minX * scale,
+                          y: (screen.frame.height - localSelection.maxY) * scale,
+                          width: localSelection.width * scale, height: localSelection.height * scale)
+            .integral
+            .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard crop.width > 1, crop.height > 1 else { return nil }
         return image.cropping(to: crop)
     }
 
-    private func recognize(image: CGImage) throws -> String {
-        // 指定常用的中英文语言模型；Vision 会按视觉顺序返回识别结果。
+    private nonisolated static func selectedAccessibilityText() -> String? {
+        guard AXIsProcessTrusted() else { return nil }
+        let system = AXUIElementCreateSystemWide()
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let focused else { return nil }
+        var selected: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextAttribute as CFString, &selected) == .success,
+              let value = selected as? String else { return nil }
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private nonisolated static func copySelectedTextFromClipboard() -> String? {
+        let pasteboard = NSPasteboard.general
+        let previous = pasteboard.string(forType: .string)
+        let changeCount = pasteboard.changeCount
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: false)
+        keyDown?.flags = .maskCommand; keyUp?.flags = .maskCommand
+        keyDown?.post(tap: .cgAnnotatedSessionEventTap); keyUp?.post(tap: .cgAnnotatedSessionEventTap)
+        for _ in 0..<10 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            if pasteboard.changeCount != changeCount { break }
+        }
+        let value = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        pasteboard.clearContents()
+        if let previous { pasteboard.setString(previous, forType: .string) }
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private nonisolated static func recognize(image: CGImage, languages: [String]) throws -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US", "zh-Hans"]
+        request.recognitionLanguages = languages
         request.usesLanguageCorrection = true
         let handler = VNImageRequestHandler(cgImage: image)
         try handler.perform([request])
-        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        return formatRecognizedText(request.results ?? [])
     }
 
-    private func callDeepSeek(text: String) throws -> String {
-        // 该方法在后台队列执行，用信号量把 URLSession 回调转换成同步结果。
+    /// Vision 返回的 observation 顺序未定义。先按纵向重叠分组为行，再按列和行排序，
+    /// 保留列布局与段落间距；每行中的候选文字按 x 坐标排列。
+    private nonisolated static func formatRecognizedText(_ observations: [VNRecognizedTextObservation]) -> String {
+        struct Item { let text: String; let box: CGRect }
+        let items = observations.compactMap { observation -> Item? in
+            guard let text = observation.topCandidates(1).first?.string else { return nil }
+            return Item(text: text, box: observation.boundingBox)
+        }
+        guard !items.isEmpty else { return "" }
+        var lines: [[Item]] = []
+        for item in items.sorted(by: { $0.box.midY > $1.box.midY }) {
+            if let index = lines.firstIndex(where: { line in
+                let minY = line.map { $0.box.minY }.min()!
+                let maxY = line.map { $0.box.maxY }.max()!
+                let overlap = min(maxY, item.box.maxY) - max(minY, item.box.minY)
+                return overlap > min(item.box.height, maxY - minY) * 0.35 || abs(item.box.midY - (minY + maxY) / 2) < max(item.box.height, maxY - minY) * 0.45
+            }) {
+                lines[index].append(item)
+            } else { lines.append([item]) }
+        }
+        lines = lines.map { line in
+            line.sorted { left, right in left.box.minX < right.box.minX }
+        }
+        lines.sort { upper, lower in
+            let upperY = upper.map { $0.box.midY }.reduce(0, +) / CGFloat(upper.count)
+            let lowerY = lower.map { $0.box.midY }.reduce(0, +) / CGFloat(lower.count)
+            return upperY > lowerY
+        }
+
+        // 将明显分离的 x 区域视为独立栏，栏内仍按从上到下读取。
+        let medianHeight = items.map(\.box.height).sorted()[items.count / 2]
+        let columnGap = max(0.06, medianHeight * 2.5)
+        var columns: [[ [Item] ]] = []
+        for line in lines {
+            let minX = line.first!.box.minX
+            if let index = columns.firstIndex(where: { column in
+                let right = column.flatMap { $0 }.map { $0.box.maxX }.max() ?? 0
+                return minX <= right + columnGap
+            }) { columns[index].append(line) } else { columns.append([line]) }
+        }
+        columns.sort { ($0.flatMap { $0 }.map { $0.box.minX }.min() ?? 0) < ($1.flatMap { $0 }.map { $0.box.minX }.min() ?? 0) }
+        var output: [String] = []
+        for column in columns {
+            let ordered = column.sorted { ($0.first?.box.midY ?? 0) > ($1.first?.box.midY ?? 0) }
+            for (index, line) in ordered.enumerated() {
+                if index > 0,
+                   let previous = ordered[index - 1].first,
+                   let current = line.first,
+                   previous.box.minY - current.box.maxY > medianHeight * 1.8 {
+                    output.append("")
+                }
+                output.append(line.map(\.text).joined(separator: " "))
+            }
+        }
+        return output.joined(separator: "\n")
+    }
+
+    private func recognitionLanguages() -> [String] {
+        switch recognitionLanguage {
+        case "中文": return ["zh-Hans"]
+        case "English": return ["en-US"]
+        case "日本語": return ["ja-JP"]
+        case "한국어": return ["ko-KR"]
+        default: return ["en-US", "zh-Hans", "ja-JP", "ko-KR"]
+        }
+    }
+
+    private nonisolated static func callDeepSeek(text: String, apiKey: String, model: String, targetLanguage: String) async throws -> String {
+        let requestID = UUID().uuidString.prefix(8)
+        let startedAt = Date()
         let body: [String: Any] = ["model": model, "temperature": 0.2, "messages": [
-            ["role": "system", "content": "你是专业翻译。只输出译文，保留原有段落、项目符号、专有名词与代码。"],
-            ["role": "user", "content": "把以下内容翻译成\(targetLanguage)：\n\n\(text)"]
+            ["role": "system", "content": "你是专业翻译。准确、完整、自然地翻译用户提供的内容，不得删减、概括、改写或补充原文信息。只输出译文，不要解释、前言或引号。保留原有段落、换行、项目符号、编号、专有名词、变量名、代码和占位符。根据上下文选择准确含义。"],
+            ["role": "user", "content": "请将下面的内容翻译成\(targetLanguage)：\n\n原文：\n\(text)"]
         ]]
         var request = URLRequest(url: URL(string: "https://api.deepseek.com/chat/completions")!)
         request.httpMethod = "POST"; request.timeoutInterval = 60
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: Result<Data, Error> = .failure(TranslationError.message("网络请求未完成"))
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error { result = .failure(error) }
-            else if let data { result = .success(data) }
-            semaphore.signal()
-        }.resume()
-        _ = semaphore.wait(timeout: .now() + 65)
-        let data = try result.get()
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        if let error = json?["error"] as? [String: Any], let message = error["message"] as? String { throw TranslationError.message(message) }
+        let data: Data
+        let response: URLResponse
+        AppLogger.shared.info("DeepSeek 请求开始 [\(requestID)]：模型 \(model)，原文长度 \(text.count)，超时 60 秒")
+        do { (data, response) = try await URLSession.shared.data(for: request) }
+        catch let error as URLError where error.code == .timedOut {
+            AppLogger.shared.error("DeepSeek 请求超时 [\(requestID)]：耗时 \(Self.elapsed(since: startedAt))")
+            throw TranslationError.message("网络请求超时，请重试（详见日志）")
+        }
+        catch let error as URLError where error.code == .cancelled {
+            AppLogger.shared.info("DeepSeek 请求已取消 [\(requestID)]：耗时 \(Self.elapsed(since: startedAt))")
+            throw CancellationError()
+        }
+        catch {
+            AppLogger.shared.error("DeepSeek 网络请求失败 [\(requestID)]：\(error.localizedDescription)，耗时 \(Self.elapsed(since: startedAt))")
+            throw TranslationError.message("网络请求失败：\(error.localizedDescription)（详见日志）")
+        }
+        guard let http = response as? HTTPURLResponse else {
+            AppLogger.shared.error("DeepSeek 响应无效 [\(requestID)]：不是 HTTP 响应")
+            throw TranslationError.message("服务器响应无效（详见日志）")
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let serverMessage = (json?["error"] as? [String: Any])?["message"] as? String
+        AppLogger.shared.info("DeepSeek 响应收到 [\(requestID)]：HTTP \(http.statusCode)，\(data.count) bytes，耗时 \(Self.elapsed(since: startedAt))")
+        guard (200..<300).contains(http.statusCode) else {
+            AppLogger.shared.error("DeepSeek 返回错误 [\(requestID)]：HTTP \(http.statusCode)\(serverMessage.map { "，\($0)" } ?? "")")
+            switch http.statusCode {
+            case 401: throw TranslationError.message("API Key 无效，请检查后重试（详见日志）")
+            case 402, 403: throw TranslationError.message("账户或额度不足，请检查 DeepSeek 账户（详见日志）")
+            case 429: throw TranslationError.message("请求过于频繁，请稍后重试（详见日志）")
+            case 500...599: throw TranslationError.message("翻译服务暂时不可用，请重试（详见日志）")
+            default: throw TranslationError.message(serverMessage ?? "请求失败（HTTP \(http.statusCode)，详见日志）")
+            }
+        }
+        if let serverMessage {
+            AppLogger.shared.error("DeepSeek 成功状态中包含错误 [\(requestID)]：\(serverMessage)")
+            throw TranslationError.message(serverMessage)
+        }
         guard let choices = json?["choices"] as? [[String: Any]],
               let message = choices.first?["message"] as? [String: Any],
-              let content = message["content"] as? String else { throw TranslationError.message("DeepSeek 返回格式异常") }
-        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+              let content = message["content"] as? String else {
+            AppLogger.shared.error("DeepSeek 返回格式异常 [\(requestID)]：未找到 choices[0].message.content")
+            throw TranslationError.message("DeepSeek 返回格式异常（详见日志）")
+        }
+        let result = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else {
+            AppLogger.shared.error("DeepSeek 返回空译文 [\(requestID)]")
+            throw TranslationError.message("DeepSeek 返回了空译文（详见日志）")
+        }
+        return result
+    }
+
+    private nonisolated static func elapsed(since start: Date) -> String {
+        String(format: "%.2f 秒", Date().timeIntervalSince(start))
+    }
+
+    private nonisolated static func callLearning(text: String, translation: String, apiKey: String, model: String) async throws -> LearningNote {
+        let body: [String: Any] = ["model": model, "temperature": 0.3, "messages": [
+            ["role": "system", "content": "你是英语学习助手。请根据原文和译文，提炼真正有帮助的学习内容。只返回严格 JSON，不要 Markdown、不要代码块、不要前言、不要结语、不要输出字段名以外的提示语。JSON 格式固定为：{\"summary\":\"用自然中文简要说明句意，不要写‘句意：’\",\"keyPoints\":\"只写实际的语法或表达规律，不要写‘表达要点：’、‘提示：’或分析过程\",\"words\":\"只列真正值得学习的词或短语，每行一个，格式为‘词 — 中文含义’，不要写‘重点词汇：’或格式说明\"}。如果某一项没有内容，返回空字符串。"],
+            ["role": "user", "content": "原文：\n\(text)\n\n译文：\n\(translation)"]
+        ]]
+        var request = URLRequest(url: URL(string: "https://api.deepseek.com/chat/completions")!)
+        request.httpMethod = "POST"; request.timeoutInterval = 60
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]], let message = choices.first?["message"] as? [String: Any],
+              var content = message["content"] as? String else { throw TranslationError.message("学习笔记生成失败") }
+        content = content.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let start = content.firstIndex(of: "{"), let end = content.lastIndex(of: "}"), start < end {
+            content = String(content[start...end])
+        }
+        guard let noteData = content.data(using: .utf8), let note = try? JSONSerialization.jsonObject(with: noteData) as? [String: String] else { throw TranslationError.message("学习笔记格式异常") }
+        return LearningNote(
+            summary: cleanLearningText(note["summary"] ?? "", prefixes: ["句意：", "句意:"]),
+            keyPoints: cleanLearningText(note["keyPoints"] ?? "", prefixes: ["表达要点：", "表达要点:", "提示：", "提示:"]),
+            words: cleanLearningText(note["words"] ?? "", prefixes: ["重点词汇：", "重点词汇:", "格式：", "格式:"])
+        )
+    }
+
+    private nonisolated static func cleanLearningText(_ text: String, prefixes: [String]) -> String {
+        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in prefixes where value.hasPrefix(prefix) {
+            value.removeFirst(prefix.count)
+            value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return value
     }
 }
 

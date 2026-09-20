@@ -13,7 +13,14 @@ final class SelectionOverlay: NSPanel {
         onDismiss: @escaping () -> Void
     ) -> SelectionOverlay {
         let window = SelectionOverlay(screen: screen, completion: completion, onDismiss: onDismiss)
-        window.makeKeyAndOrderFront(nil)
+        // 非激活面板不会自动抢到键盘/鼠标焦点；显式激活并置顶，确保点击主窗口按钮后
+        // 能立即进入框选状态，而不是看起来“没有反应”。
+        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+        window.makeKey()
+        if let contentView = window.contentView {
+            window.makeFirstResponder(contentView)
+        }
         return window
     }
 
@@ -40,9 +47,11 @@ final class SelectionOverlay: NSPanel {
             self.completion = nil
             self.orderOut(nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                // 先让调用方同步完成 CGDisplay 截图，再通知外层恢复主窗口；否则主窗口
+                // 会在截图前重新出现，导致 OCR 截到翻译器自己的界面。
+                completion?(rect)
                 self?.onDismiss?()
                 self?.onDismiss = nil
-                completion?(rect)
             }
         }
     }

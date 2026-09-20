@@ -1,19 +1,57 @@
 import AppKit
-import Combine
+import SwiftUI
 
-/// 统一控制主界面的显示状态，供 SwiftUI 按钮和菜单栏菜单共同使用。
+/// 持有唯一主窗口，关闭后仍可通过菜单栏恢复。
+@MainActor
 final class AppVisibilityController: ObservableObject {
+    private var mainWindow: NSWindow?
+
     func hideToMenuBar() {
-        // 隐藏应用不会终止进程，因此全局热键和菜单栏图标仍然有效。
         NSApp.hide(nil)
     }
 
-    func showMainWindow() {
-        // 先解除应用隐藏状态，再把现有 SwiftUI 窗口带到前台。
-        NSApp.unhide(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    /// 隐藏主窗口但保留应用本身，供截图面板覆盖真实桌面内容。
+    /// 返回值用于在截图结束或取消时恢复原来的窗口状态。
+    @discardableResult
+    func hideMainWindowForCapture() -> Bool {
+        guard let mainWindow, mainWindow.isVisible else { return false }
+        mainWindow.orderOut(nil)
+        return true
+    }
 
-        let window = NSApp.windows.first(where: { $0.canBecomeMain })
-        window?.makeKeyAndOrderFront(nil)
+    func restoreMainWindowAfterCapture(wasVisible: Bool) {
+        guard wasVisible, let mainWindow else { return }
+        mainWindow.orderFrontRegardless()
+        mainWindow.makeKey()
+    }
+
+    func showMainWindow(store: TranslationStore) {
+        if mainWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 820, height: 640),
+                styleMask: [.titled, .closable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "截图翻译器"
+            window.identifier = NSUserInterfaceItemIdentifier("translatorMainWindow")
+            window.isReleasedWhenClosed = false
+            window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            window.contentView = NSHostingView(rootView: ContentView()
+                .environmentObject(store)
+                .environmentObject(self))
+            window.center()
+            mainWindow = window
+        }
+
+        // 等菜单收起，再激活并恢复明确持有的主窗口。
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.mainWindow else { return }
+            NSApp.unhide(nil)
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
     }
 }
