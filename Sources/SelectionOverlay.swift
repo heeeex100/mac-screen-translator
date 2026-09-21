@@ -1,7 +1,7 @@
 import AppKit
 
 /// 覆盖目标屏幕的透明框选面板。
-/// `.nonactivatingPanel` 可避免开始截图时切换到主窗口所在的桌面空间。
+/// 显式获取键盘焦点以接收框选操作和 Escape。
 final class SelectionOverlay: NSPanel {
     private var completion: ((NSRect) -> Void)?
     private var onDismiss: (() -> Void)?
@@ -13,11 +13,10 @@ final class SelectionOverlay: NSPanel {
         onDismiss: @escaping () -> Void
     ) -> SelectionOverlay {
         let window = SelectionOverlay(screen: screen, completion: completion, onDismiss: onDismiss)
-        // 非激活面板不会自动抢到键盘/鼠标焦点；显式激活并置顶，确保点击主窗口按钮后
-        // 能立即进入框选状态，而不是看起来“没有反应”。
+        // 框选面板必须成为 Key Window 才能稳定接收鼠标拖拽和 Escape。
         NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
-        window.makeKey()
         if let contentView = window.contentView {
             window.makeFirstResponder(contentView)
         }
@@ -29,13 +28,14 @@ final class SelectionOverlay: NSPanel {
         self.onDismiss = onDismiss
         super.init(
             contentRect: screen.frame,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         isOpaque = false
         backgroundColor = .clear
         level = .screenSaver
+        ignoresMouseEvents = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false

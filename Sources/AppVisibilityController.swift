@@ -25,7 +25,9 @@ final class AppVisibilityController: ObservableObject {
         mainWindow.makeKey()
     }
 
-    func showMainWindow(store: TranslationStore) {
+    func showMainWindow(store: TranslationStore, capture: @escaping () -> Void,
+                        recognize: @escaping () -> Void,
+                        setHotkeyEnabled: @escaping (Bool) -> Void) {
         if mainWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 820, height: 640),
@@ -37,7 +39,8 @@ final class AppVisibilityController: ObservableObject {
             window.identifier = NSUserInterfaceItemIdentifier("translatorMainWindow")
             window.isReleasedWhenClosed = false
             window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-            window.contentView = NSHostingView(rootView: ContentView()
+            window.contentView = NSHostingView(rootView: ContentView(capture: capture,
+                                                recognize: recognize, setHotkeyEnabled: setHotkeyEnabled)
                 .environmentObject(store)
                 .environmentObject(self))
             window.center()

@@ -1,13 +1,12 @@
 # 截图翻译器
 
-一款面向 macOS 的原生截图翻译工具。框选屏幕上的文字后，使用 Apple Vision 识别内容，并通过 DeepSeek API 翻译成目标语言。
+一款面向 macOS 的原生截图翻译工具。框选屏幕上的文字后，使用 Apple Vision 识别内容，并通过 OpenAI 或 DeepSeek API 翻译成目标语言。
 
 ## ✨ 功能
 
 - 框选屏幕区域，自动 OCR 并翻译
 - 单独执行 OCR，识别结果自动复制到剪贴板
 - 翻译当前剪贴板中的文字
-- 翻译其他应用当前选中的文字，点击按钮后会自动切回原应用读取选区
 - 支持中文、英文、日文、韩文和自动识别
 - 支持直接编辑识别结果，再按 `⌘ Enter` 翻译
 - 在独立悬浮窗口中查看翻译结果
@@ -20,7 +19,7 @@
 
 - macOS 14.0 或更高版本
 - Swift 5.9 或更高版本
-- 一个可用的 [DeepSeek API Key](https://platform.deepseek.com/)
+- 一个可用的 [OpenAI API Key](https://platform.openai.com/api-keys) 或 [DeepSeek API Key](https://platform.deepseek.com/)
 - 本地构建需要 Xcode Command Line Tools 或完整 Xcode
 
 ## 🚀 快速开始
@@ -53,11 +52,11 @@ open dist/MacScreenTranslator.app
 启动应用后：
 
 1. 点击右上角的“设置”。
-2. 填写 DeepSeek API Key。
+2. 在设置中选择 OpenAI 或 DeepSeek，填写对应的 API Key。
 3. 选择模型和目标语言。
 4. 点击“保存 API Key”或“完成”。
 
-默认模型是 `deepseek-flash`，可以根据 DeepSeek 账户中可用的模型自行修改。
+DeepSeek 默认模型是 `deepseek-flash`，OpenAI 默认模型是 `gpt-4o-mini`，都可以根据账户中可用的模型自行修改。
 
 ## ⌨️ 使用方式
 
@@ -65,18 +64,16 @@ open dist/MacScreenTranslator.app
 | --- | --- | --- |
 | 框选翻译 | `⌃ ⇧ T` | 框选屏幕区域，识别文字并翻译 |
 | 翻译剪贴板 | `⌃ ⇧ V` | 翻译剪贴板中的纯文本 |
-| 翻译选中文字 | — | 先在其他应用中选中文字，再点击主窗口按钮；应用会自动恢复原选区 |
 | 仅 OCR | — | 框选区域并识别文字，结果自动复制到剪贴板 |
 | 翻译编辑后的原文 | `⌘ Enter` | 修改“识别原文”后重新提交翻译 |
 
-截图翻译、OCR 和翻译选中文字也可以从菜单栏图标或主窗口中执行。快捷键可以在“设置”中重新录制。
+截图翻译和 OCR 也可以从菜单栏图标或主窗口中执行。看到文字后按下“框选翻译”快捷键，再拖出包含文字的区域即可识别和翻译；快捷键可以在“设置”中重新录制。
 
 ## 🔐 系统权限
 
 首次使用相关功能时，请在“系统设置 → 隐私与安全性”中授予权限：
 
 - **屏幕录制**：用于截取框选区域，截图翻译和 OCR 都需要此权限。
-- **辅助功能**：用于读取其他应用当前选中的文字。没有此权限时，应用会尝试通过模拟 `⌘ C` 获取选区。
 
 权限与应用的签名身份和路径有关。重新签名、修改 Bundle ID 或更换应用位置后，macOS 可能要求重新授权。
 
@@ -102,7 +99,7 @@ open dist/MacScreenTranslator.app
 - **SwiftUI**：主界面和设置界面
 - **AppKit**：菜单栏、窗口管理、全局快捷键和选区面板
 - **Vision**：本地文字识别
-- **DeepSeek Chat Completions API**：翻译和学习笔记
+- **OpenAI / DeepSeek Chat Completions API**：翻译和学习笔记
 - **Security.framework**：保存 API Key 到 macOS 钥匙串
 - **CoreGraphics**：屏幕截图和选区裁剪
 

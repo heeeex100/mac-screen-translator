@@ -3,10 +3,13 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var store: TranslationStore
     @EnvironmentObject var visibilityController: AppVisibilityController
+    let capture: () -> Void
+    let recognize: () -> Void
+    let setHotkeyEnabled: (Bool) -> Void
     @State private var settingsShown = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
             header
             actionPanel
             statusRow
@@ -14,13 +17,19 @@ struct ContentView: View {
                 sourceTextCard
                 textCard(title: "译文", subtitle: store.translation.isEmpty ? "TRANSLATION" : store.targetLanguage.uppercased(), text: store.translation, color: .purple)
             }
-            .frame(height: 250)
+            .frame(height: 268)
             learningCard
         }
-        .padding(24)
-        .frame(width: 820, height: 760)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: $settingsShown) { SettingsView().environmentObject(store) }
+        .padding(26)
+        .frame(width: 860, height: 790)
+        .background {
+            LinearGradient(
+                colors: [Color(nsColor: .windowBackgroundColor), Color(nsColor: .underPageBackgroundColor)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .sheet(isPresented: $settingsShown) { SettingsView(setHotkeyEnabled: setHotkeyEnabled).environmentObject(store) }
         .onReceive(NotificationCenter.default.publisher(for: .openTranslationSettings)) { _ in
             settingsShown = true
         }
@@ -29,10 +38,19 @@ struct ContentView: View {
     private var learningCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
-                Text("学习笔记").font(.headline)
+                Image(systemName: "lightbulb.fill")
+                    .foregroundStyle(.orange)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(Color.orange.opacity(0.14)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("学习笔记").font(.headline)
+                    Text("把一次翻译变成下一次记忆").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text(store.learningNote == nil ? "翻译完成后自动生成" : "重点理解").font(.caption).foregroundStyle(.secondary)
+                Text(store.learningNote == nil ? "翻译完成后自动生成" : "重点理解")
+                    .font(.caption.weight(.medium)).foregroundStyle(.orange)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Capsule().fill(Color.orange.opacity(0.1)))
             }
             if let note = store.learningNote {
                 VStack(alignment: .leading, spacing: 8) {
@@ -46,10 +64,10 @@ struct ContentView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
-        .padding(16)
+        .padding(17)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.yellow.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.yellow.opacity(0.25), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.orange.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.orange.opacity(0.2), lineWidth: 1))
     }
 
     private func learningSection(_ title: String, _ text: String, icon: String) -> some View {
@@ -60,21 +78,28 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: 15)
+                    .fill(LinearGradient(colors: [.indigo, .purple, .pink.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing))
                 Image(systemName: "character.book.closed.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 21, weight: .bold))
                     .foregroundStyle(.white)
             }
-            .frame(width: 48, height: 48)
+            .frame(width: 52, height: 52)
             VStack(alignment: .leading, spacing: 3) {
                 Text("截图翻译器").font(.title2.bold())
-                Text("快速识别屏幕文字，翻译成你需要的语言")
+                Text("识别屏幕文字，立即获得自然译文")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
+            HStack(spacing: 6) {
+                Circle().fill(store.isTranslating ? .orange : .green).frame(width: 7, height: 7)
+                Text(store.isTranslating ? "处理中" : "已就绪")
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Capsule().fill(Color(nsColor: .controlBackgroundColor)))
             Button { settingsShown = true } label: {
                 Label("设置", systemImage: "gearshape")
             }
@@ -89,26 +114,30 @@ struct ContentView: View {
 
     private var actionPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("开始翻译").font(.headline)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("开始翻译").font(.headline)
+                    Text("选择一种方式把文字带进工作区").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("⌘↩︎ 翻译输入内容").font(.caption).foregroundStyle(.tertiary)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                 actionButton("框选翻译", detail: store.captureShortcutTitle, icon: "viewfinder", tint: .indigo) {
-                    NSApp.delegate.flatMap { ($0 as? AppDelegate)?.captureRequested() }
+                    capture()
                 }
                 actionButton("翻译剪贴板", detail: store.clipboardShortcutTitle, icon: "doc.on.clipboard", tint: .teal) { store.translateClipboard() }
-                actionButton("翻译选中文字", detail: "保留当前选区", icon: "text.quote", tint: .orange) {
-                    NSApp.delegate.flatMap { ($0 as? AppDelegate)?.translateSelectedText() }
-                }
                 actionButton("仅 OCR", detail: "自动复制", icon: "text.viewfinder", tint: .blue) {
-                    NSApp.delegate.flatMap { ($0 as? AppDelegate)?.captureRequested(mode: .ocr) }
+                    recognize()
                 }
             }
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.quaternary, lineWidth: 1))
+        .padding(17)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor).opacity(0.72)))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.quaternary, lineWidth: 1))
         .disabled(store.isTranslating)
     }
 
@@ -120,8 +149,9 @@ struct ContentView: View {
                 Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.08)))
+            .padding(13)
+            .background(RoundedRectangle(cornerRadius: 11).fill(tint.opacity(0.09)))
+            .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(tint.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .frame(width: 148, alignment: .leading)
@@ -129,8 +159,8 @@ struct ContentView: View {
 
     private var statusRow: some View {
         HStack(spacing: 9) {
-            Image(systemName: store.isTranslating ? "arrow.triangle.2.circlepath" : (store.state == .succeeded ? "checkmark.circle.fill" : (store.state == .failed ? "exclamationmark.triangle.fill" : "info.circle.fill")))
-                .foregroundStyle(store.state == .succeeded ? .green : (store.state == .failed ? .orange : .secondary))
+            Image(systemName: statusIcon)
+                .foregroundStyle(statusColor)
             Text(store.status).font(.callout).foregroundStyle(.secondary).lineLimit(2)
             Spacer()
             if store.isTranslating {
@@ -140,12 +170,27 @@ struct ContentView: View {
                 Button("重试") { store.retryLastTranslation() }.buttonStyle(.bordered)
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+    }
+
+    private var statusIcon: String {
+        if store.isTranslating { return "arrow.triangle.2.circlepath" }
+        if store.state == .succeeded { return "checkmark.circle.fill" }
+        if store.state == .failed { return "exclamationmark.triangle.fill" }
+        return "info.circle.fill"
+    }
+
+    private var statusColor: Color {
+        if store.isTranslating { return .indigo }
+        if store.state == .succeeded { return .green }
+        if store.state == .failed { return .orange }
+        return .secondary
     }
 
     private func textCard(title: String, subtitle: String, text: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
                 Circle().fill(color).frame(width: 8, height: 8)
                 Text(title).font(.headline)
                 Spacer()
@@ -155,6 +200,7 @@ struct ContentView: View {
                 ScrollView {
                     Text(text.isEmpty ? "" : text)
                         .font(.system(size: 16))
+                        .lineSpacing(3)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(12)
@@ -162,8 +208,13 @@ struct ContentView: View {
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .textBackgroundColor)))
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, lineWidth: 1))
                 if text.isEmpty {
-                    Text(title == "识别原文" ? "框选区域或输入文字后，原文会显示在这里" : "翻译结果会显示在这里")
-                        .font(.callout).foregroundStyle(.tertiary).padding(18)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Image(systemName: title == "识别原文" ? "text.viewfinder" : "character.bubble")
+                            .foregroundStyle(color.opacity(0.65))
+                        Text(title == "识别原文" ? "框选区域或输入文字后，原文会显示在这里" : "翻译结果会显示在这里")
+                            .font(.callout).foregroundStyle(.tertiary)
+                    }
+                    .padding(18)
                         .allowsHitTesting(false)
                 }
             }
@@ -205,6 +256,7 @@ struct ContentView: View {
 }
 
 private struct SettingsView: View {
+    let setHotkeyEnabled: (Bool) -> Void
     @EnvironmentObject var store: TranslationStore
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: SettingsField?
@@ -216,8 +268,16 @@ private struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("DeepSeek 设置").font(.title2.bold())
-            SecureField("DeepSeek API Key", text: $store.apiKey)
+            Text("API 设置").font(.title2.bold())
+            Picker("服务商", selection: $store.providerRaw) {
+                ForEach(APIProvider.allCases) { provider in
+                    Text(provider.title).tag(provider.rawValue)
+                }
+            }
+            .onChange(of: store.providerRaw) { _, rawValue in
+                store.provider = APIProvider(rawValue: rawValue) ?? .deepSeek
+            }
+            SecureField("\(store.provider.title) API Key", text: $store.apiKey)
                 .focused($focusedField, equals: .apiKey)
             if let error = store.apiKeyStorageError {
                 Text(error)
@@ -256,7 +316,7 @@ private struct SettingsView: View {
                 Text("中文（简体）").tag("中文（简体）"); Text("English").tag("English")
                 Text("日本語").tag("日本語"); Text("한국어").tag("한국어")
             }
-            Text("接口：https://api.deepseek.com/chat/completions\n模型默认：deepseek-flash")
+            Text("接口：\(store.provider.baseURL.absoluteString)/chat/completions\n模型默认：\(store.provider.defaultModel)")
                 .font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -272,12 +332,12 @@ private struct SettingsView: View {
         }
         .padding(24).frame(width: 460)
         .onAppear {
-            (NSApp.delegate as? AppDelegate)?.setHotkeyEnabled(false)
+            setHotkeyEnabled(false)
             NSApp.activate(ignoringOtherApps: true)
             DispatchQueue.main.async {
                 focusedField = .apiKey
             }
         }
-        .onDisappear { (NSApp.delegate as? AppDelegate)?.setHotkeyEnabled(true) }
+        .onDisappear { setHotkeyEnabled(true) }
     }
 }

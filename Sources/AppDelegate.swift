@@ -14,23 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyEnabled = true
     private var hotkeyObserver: NSObjectProtocol?
     private var clipboardHotkeyObserver: NSObjectProtocol?
-    private var workspaceActivationObserver: NSObjectProtocol?
-    private var previousExternalApplication: NSRunningApplication?
     private var statusItem: NSStatusItem?
     private var captureMenuItem: NSMenuItem?
     private var clipboardMenuItem: NSMenuItem?
     private var translationObserver: NSObjectProtocol?
-    private var accessibilityObserver: NSObjectProtocol?
     private let translationPanelController = TranslationResultPanelController()
-
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // 在应用第一次激活前记录启动它的外部应用，覆盖“先在浏览器选中文字，
-        // 再打开截图翻译器”的常见使用方式。
-        let application = NSWorkspace.shared.frontmostApplication
-        if let application, application.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            previousExternalApplication = application
-        }
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `swift run` 启动的是普通可执行文件，不一定会自动采用 GUI 应用的激活策略。
@@ -49,23 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.configureGlobalHotkey()
             self?.updateClipboardMenuTitle()
         }
-        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  application.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
-            self.previousExternalApplication = application
-        }
         translationObserver = NotificationCenter.default.addObserver(
             forName: .translationCompleted, object: nil, queue: .main
         ) { [weak self] notification in
             guard let result = notification.object as? TranslationDisplayResult else { return }
             if let self { self.translationPanelController.show(result, store: self.store) }
         }
-        accessibilityObserver = NotificationCenter.default.addObserver(
-            forName: .openAccessibilitySettings, object: nil, queue: .main
-        ) { [weak self] _ in self?.openAccessibilitySettings() }
         configureGlobalHotkey()
         checkRequiredPermissions()
         showMainWindow()
@@ -81,9 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let eventHandler { RemoveEventHandler(eventHandler) }
         if let hotkeyObserver { NotificationCenter.default.removeObserver(hotkeyObserver) }
         if let clipboardHotkeyObserver { NotificationCenter.default.removeObserver(clipboardHotkeyObserver) }
-        if let workspaceActivationObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver) }
         if let translationObserver { NotificationCenter.default.removeObserver(translationObserver) }
-        if let accessibilityObserver { NotificationCenter.default.removeObserver(accessibilityObserver) }
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
     }
 
@@ -102,7 +77,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureMenuItem = captureItem
         updateCaptureMenuTitle()
         menu.addItem(withTitle: "框选 OCR（自动复制）", action: #selector(startOCR), keyEquivalent: "")
-        menu.addItem(withTitle: "翻译选中文字", action: #selector(translateSelection), keyEquivalent: "")
         let clipboardItem = menu.addItem(withTitle: "", action: #selector(translateClipboard), keyEquivalent: "")
         clipboardMenuItem = clipboardItem
         updateClipboardMenuTitle()
@@ -124,7 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindow() {
-        visibilityController.showMainWindow(store: store)
+        visibilityController.showMainWindow(
+            store: store,
+            capture: { [weak self] in self?.captureRequested() },
+            recognize: { [weak self] in self?.captureRequested(mode: .ocr) },
+            setHotkeyEnabled: { [weak self] enabled in self?.setHotkeyEnabled(enabled) }
+        )
     }
 
     func hideMainWindow() {
@@ -139,28 +118,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureRequested(mode: .ocr)
     }
 
-    @objc private func translateSelection() {
-        translateSelectedText()
-    }
-
-    /// 点击主窗口按钮会先让原来选中文字的应用重新获得焦点，再读取选区。
-    /// 这样用户不必在“选中文字”之后重新复制，也不会因为点击本应用而丢失选区。
-    func translateSelectedText() {
-        guard let target = previousExternalApplication, !target.isTerminated else {
-            store.translateSelectedText()
-            return
-        }
-
-        let wasVisible = visibilityController.hideMainWindowForCapture()
-        store.status = "正在读取外部应用中的选中文字…"
-        target.activate(options: [.activateAllWindows])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self else { return }
-            self.store.translateSelectedText()
-            self.visibilityController.restoreMainWindowAfterCapture(wasVisible: wasVisible)
-        }
-    }
-
     @objc private func translateClipboard() {
         store.translateClipboard()
     }
@@ -170,18 +127,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Let the status-item menu finish dismissing before presenting the sheet.
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .openTranslationSettings, object: nil)
-        }
-    }
-
-    @objc private func openAccessibilitySettings() {
-        let alert = NSAlert()
-        alert.messageText = "需要辅助功能权限"
-        alert.informativeText = "读取其他应用中选中的文字需要辅助功能权限。"
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "稍后处理")
-        if alert.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
         }
     }
 
@@ -255,12 +200,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func captureRequested(mode: CaptureMode = .translation) {
         // 系统可能重复投递同一次热键事件。持有唯一遮罩，直到框选完成或取消，
         // 可以防止叠出两个遮罩、要求用户框选两次。
-        guard !store.isTranslating, selectionOverlay == nil else { return }
+        guard !store.isTranslating else {
+            AppLogger.shared.info("忽略框选请求：当前已有任务在执行")
+            return
+        }
+        guard selectionOverlay == nil else {
+            AppLogger.shared.info("忽略框选请求：框选面板已经存在")
+            return
+        }
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-        guard let screen else { return }
+        guard let screen else {
+            AppLogger.shared.error("框选失败：找不到当前屏幕")
+            return
+        }
         let mainWindowWasVisible = visibilityController.hideMainWindowForCapture()
         store.status = mode == .ocr ? "请框选要识别的区域…" : "请框选要翻译的区域…"
+        AppLogger.shared.info("开始框选：模式=\(mode == .ocr ? "OCR" : "翻译")，屏幕=\(screen.frame)")
         selectionOverlay = SelectionOverlay.present(
             on: screen,
             completion: { [weak self] rect in
@@ -273,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onDismiss: { [weak self] in
                 guard let self else { return }
                 self.selectionOverlay = nil
+                AppLogger.shared.info("框选结束或取消")
                 self.visibilityController.restoreMainWindowAfterCapture(wasVisible: mainWindowWasVisible)
             }
         )

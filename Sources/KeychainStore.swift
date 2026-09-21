@@ -1,14 +1,26 @@
 import Foundation
 import Security
 
-/// 对 Security.framework 的轻量封装，只负责保存 DeepSeek API Key。
+/// 对 Security.framework 的轻量封装，按 API 提供商分别保存 API Key。
 enum KeychainStore {
     // 使用固定 service，确保 `swift run` 和打包后的 App 访问同一条钥匙串记录。
     private static let service = "com.yangchenjie.mac-screen-translator"
-    private static let account = "deepseek-api-key"
+    private static let legacyAccount = "deepseek-api-key"
 
-    static func loadAPIKey() throws -> String? {
-        var query = baseQuery
+    static func loadAPIKey(provider: APIProvider = .deepSeek) throws -> String? {
+        try load(account: account(for: provider))
+    }
+
+    static func saveAPIKey(_ value: String, provider: APIProvider = .deepSeek) throws {
+        try save(value, account: account(for: provider))
+    }
+
+    // 旧版本只保存 DeepSeek Key，保留无参数 API 方便迁移和兼容。
+    static func loadAPIKey() throws -> String? { try load(account: legacyAccount) }
+    static func saveAPIKey(_ value: String) throws { try save(value, account: legacyAccount) }
+
+    private static func load(account: String) throws -> String? {
+        var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -23,10 +35,10 @@ enum KeychainStore {
         return value
     }
 
-    static func saveAPIKey(_ value: String) throws {
+    private static func save(_ value: String, account: String) throws {
         // 空字符串表示用户主动清除 Key，应删除记录而不是保存空数据。
         if value.isEmpty {
-            let status = SecItemDelete(baseQuery as CFDictionary)
+            let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else {
                 throw KeychainError(status: status)
             }
@@ -36,12 +48,12 @@ enum KeychainStore {
         let data = Data(value.utf8)
         // 优先更新现有记录；不存在时再新增，避免生成重复项。
         let updateStatus = SecItemUpdate(
-            baseQuery as CFDictionary,
+            baseQuery(account: account) as CFDictionary,
             [kSecValueData as String: data] as CFDictionary
         )
 
         if updateStatus == errSecItemNotFound {
-            var item = baseQuery
+            var item = baseQuery(account: account)
             item[kSecValueData as String] = data
             let addStatus = SecItemAdd(item as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw KeychainError(status: addStatus) }
@@ -50,7 +62,11 @@ enum KeychainStore {
         }
     }
 
-    private static var baseQuery: [String: Any] {
+    private static func account(for provider: APIProvider) -> String {
+        provider == .openAI ? "openai-api-key" : legacyAccount
+    }
+
+    private static func baseQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
