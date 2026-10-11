@@ -66,9 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // NSStatusItem 必须由 AppDelegate 强引用，否则创建后会立即从菜单栏消失。
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "截图翻译器")
+            button.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "多多翻译")
             button.imagePosition = .imageOnly
-            button.toolTip = "截图翻译器"
+            button.toolTip = "多多翻译"
         }
 
         let menu = NSMenu()
@@ -83,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出截图翻译器", action: #selector(terminate), keyEquivalent: "q")
+        menu.addItem(withTitle: "退出多多翻译", action: #selector(terminate), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
         item.menu = menu
         statusItem = item

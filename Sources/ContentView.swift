@@ -88,7 +88,7 @@ struct ContentView: View {
             }
             .frame(width: 52, height: 52)
             VStack(alignment: .leading, spacing: 3) {
-                Text("截图翻译器").font(.title2.bold())
+                Text("多多翻译").font(.title2.bold())
                 Text("识别屏幕文字，立即获得自然译文")
                     .font(.subheadline).foregroundStyle(.secondary)
             }

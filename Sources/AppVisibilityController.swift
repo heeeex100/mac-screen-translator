@@ -35,7 +35,7 @@ final class AppVisibilityController: ObservableObject {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "截图翻译器"
+            window.title = "多多翻译"
             window.identifier = NSUserInterfaceItemIdentifier("translatorMainWindow")
             window.isReleasedWhenClosed = false
             window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]

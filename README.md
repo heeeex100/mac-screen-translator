@@ -1,4 +1,4 @@
-# 截图翻译器
+# 多多翻译
 
 一款面向 macOS 的原生截图翻译工具。框选屏幕上的文字后，使用 Apple Vision 识别内容，并通过 OpenAI 或 DeepSeek API 翻译成目标语言。
 
@@ -119,8 +119,14 @@ Sources/
 └── AppLogger.swift                  # 请求日志
 
 Packaging/Info.plist                # App 元数据和权限说明
+Packaging/AppIcon.png               # 图标源图
+Packaging/AppIcon.icns              # macOS 多尺寸图标
+Scripts/build-icon.sh               # 图标转换脚本
 Scripts/build-app.sh                 # Release 构建与签名脚本
+docs/design/icon-history/           # 历史图标设计稿和提示词
 ```
+
+图标设计过程、接入方式和替换步骤见 [图标设计与接入](./docs/图标设计与接入.md)。
 
 ## 📝 日志
 
