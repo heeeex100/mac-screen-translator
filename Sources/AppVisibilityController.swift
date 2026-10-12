@@ -30,7 +30,7 @@ final class AppVisibilityController: ObservableObject {
                         setHotkeyEnabled: @escaping (Bool) -> Void) {
         if mainWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 820, height: 640),
+                contentRect: NSRect(x: 0, y: 0, width: 860, height: 790),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false

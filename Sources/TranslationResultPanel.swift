@@ -63,8 +63,13 @@ private struct FloatingTranslationView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .center) {
-                    Label("译文", systemImage: "character.bubble")
-                        .font(.headline)
+                    HStack(spacing: 9) {
+                        BrandIcon(size: 38)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("多多翻译").font(.headline)
+                            Text("译文已送达").font(.caption).foregroundStyle(AppTheme.secondary)
+                        }
+                    }
                     Spacer()
                     if store.canLearnCurrentText {
                         Button {
@@ -73,8 +78,8 @@ private struct FloatingTranslationView: View {
                         } label: {
                             Label(learningExpanded ? "收起" : "学习", systemImage: "lightbulb.fill")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.orange)
+                        .buttonStyle(WarmButtonStyle(prominent: true))
+                        .tint(AppTheme.accent)
                     }
                 }
 
@@ -84,9 +89,7 @@ private struct FloatingTranslationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
                     .padding(14)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
+                    .warmCard(radius: 16)
 
                 if learningExpanded {
                     learningContent
@@ -95,38 +98,39 @@ private struct FloatingTranslationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("原文", systemImage: "text.quote")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.secondary)
                     Text(result.source)
                         .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.secondary)
                         .lineSpacing(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
                 .padding(14)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.7))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .warmCard(fill: AppTheme.peach.opacity(0.35), radius: 16)
             }
             .padding(18)
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 380, idealHeight: 420)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .foregroundStyle(AppTheme.cocoa)
+        .tint(AppTheme.accent)
+        .background(AppTheme.background)
     }
 
     @ViewBuilder private var learningContent: some View {
         if store.isLoadingLearningNote {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("正在整理这句话…").foregroundStyle(.secondary)
+                Text("正在整理这句话…").foregroundStyle(AppTheme.secondary)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.08))
+            .background(AppTheme.peach.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         } else if let note = store.learningNote {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 7) {
-                    Image(systemName: "lightbulb.fill").foregroundStyle(.orange)
+                    Image(systemName: "lightbulb.fill").foregroundStyle(AppTheme.accent)
                     Text("理解这句话").font(.subheadline.weight(.semibold))
                 }
                 if !note.summary.isEmpty {
@@ -141,7 +145,7 @@ private struct FloatingTranslationView: View {
             }
             .textSelection(.enabled)
         } else {
-            Text("正在准备学习内容…").font(.callout).foregroundStyle(.secondary)
+            Text("正在准备学习内容…").font(.callout).foregroundStyle(AppTheme.secondary)
         }
     }
 
@@ -149,14 +153,14 @@ private struct FloatingTranslationView: View {
         VStack(alignment: .leading, spacing: 5) {
             Label(title, systemImage: icon)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.accent)
             Text(text)
                 .font(.callout)
                 .lineSpacing(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
-        .background(Color.orange.opacity(0.07))
+        .background(AppTheme.peach.opacity(0.4))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }

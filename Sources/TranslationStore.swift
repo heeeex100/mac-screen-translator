@@ -376,14 +376,11 @@ final class TranslationStore: ObservableObject {
         }
         // SelectionOverlay 的 contentView 使用屏幕本地坐标（左下角为 0,0）。
         // 不要再次减去 NSScreen 的全局 origin，否则副屏上的选区会整体偏移。
-        let localSelection = selection
-        let scale = CGFloat(image.width) / screen.frame.width
-        let crop = CGRect(x: localSelection.minX * scale,
-                          y: (screen.frame.height - localSelection.maxY) * scale,
-                          width: localSelection.width * scale, height: localSelection.height * scale)
-            .integral
-            .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        guard crop.width > 1, crop.height > 1 else {
+        guard let crop = ScreenshotGeometry.cropRect(
+            selection: selection,
+            screenSize: screen.frame.size,
+            imageSize: CGSize(width: image.width, height: image.height)
+        ) else {
             AppLogger.shared.error("截图失败：选区裁剪为空，screen=\(screen.frame), selection=\(selection)")
             return nil
         }
@@ -553,26 +550,8 @@ final class TranslationStore: ObservableObject {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]], let message = choices.first?["message"] as? [String: Any],
-              var content = message["content"] as? String else { throw TranslationError.message("学习笔记生成失败") }
-        content = content.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if let start = content.firstIndex(of: "{"), let end = content.lastIndex(of: "}"), start < end {
-            content = String(content[start...end])
-        }
-        guard let noteData = content.data(using: .utf8), let note = try? JSONSerialization.jsonObject(with: noteData) as? [String: String] else { throw TranslationError.message("学习笔记格式异常") }
-        return LearningNote(
-            summary: cleanLearningText(note["summary"] ?? "", prefixes: ["句意：", "句意:"]),
-            keyPoints: cleanLearningText(note["keyPoints"] ?? "", prefixes: ["表达要点：", "表达要点:", "提示：", "提示:"]),
-            words: cleanLearningText(note["words"] ?? "", prefixes: ["重点词汇：", "重点词汇:", "格式：", "格式:"])
-        )
-    }
-
-    private nonisolated static func cleanLearningText(_ text: String, prefixes: [String]) -> String {
-        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for prefix in prefixes where value.hasPrefix(prefix) {
-            value.removeFirst(prefix.count)
-            value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return value
+              let content = message["content"] as? String else { throw TranslationError.message("学习笔记生成失败") }
+        return try LearningNoteParser.parse(content)
     }
 }
 

@@ -5,5 +5,8 @@ let package = Package(
     name: "MacScreenTranslator",
     platforms: [.macOS(.v14)],
     products: [.executable(name: "MacScreenTranslator", targets: ["MacScreenTranslator"])],
-    targets: [.executableTarget(name: "MacScreenTranslator", path: "Sources")]
+    targets: [
+        .executableTarget(name: "MacScreenTranslator", path: "Sources"),
+        .testTarget(name: "MacScreenTranslatorTests", dependencies: ["MacScreenTranslator"])
+    ]
 )

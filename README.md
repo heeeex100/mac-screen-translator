@@ -94,6 +94,16 @@ open dist/MacScreenTranslator.app
 
 日常测试建议使用打包后的 App。这样可以保持应用身份稳定，避免 `swift run`、Xcode 运行和打包应用之间反复切换导致隐私权限失效。
 
+## 🧪 单元测试
+
+在项目根目录执行：
+
+```bash
+swift test
+```
+
+目前包含 20 个 XCTest 用例，覆盖学习笔记解析、截图坐标换算和快捷键显示，不访问网络、钥匙串或屏幕录制权限。覆盖范围与调试方法见 [单元测试说明](./docs/单元测试说明.md)。
+
 ## 🧱 技术栈
 
 - **SwiftUI**：主界面和设置界面
@@ -121,12 +131,16 @@ Sources/
 Packaging/Info.plist                # App 元数据和权限说明
 Packaging/AppIcon.png               # 图标源图
 Packaging/AppIcon.icns              # macOS 多尺寸图标
+Packaging/StatusIcon-source.png     # 配套状态栏透明单色源图
+Packaging/StatusIcon*.png            # 状态栏普通及 Retina 资源
 Scripts/build-icon.sh               # 图标转换脚本
 Scripts/build-app.sh                 # Release 构建与签名脚本
 docs/design/icon-history/           # 历史图标设计稿和提示词
 ```
 
 图标设计过程、接入方式和替换步骤见 [图标设计与接入](./docs/图标设计与接入.md)。
+当前色块版与配套状态栏图标见 [色块图标与状态栏图标](./docs/色块图标与状态栏图标.md)。
+与图标配套的暖色界面、明暗预览及验证说明见 [界面美化说明](./docs/界面美化说明.md)。
 
 ## 📝 日志
 

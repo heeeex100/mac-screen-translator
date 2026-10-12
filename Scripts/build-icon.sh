@@ -19,4 +19,8 @@ for size in 16 32 128 256 512; do
 done
 
 iconutil -c icns "${ICONSET_DIR}" -o "${OUTPUT_ICON}"
+sips -z 18 18 "${PROJECT_DIR}/Packaging/StatusIcon-source.png" \
+    --out "${PROJECT_DIR}/Packaging/StatusIcon.png" >/dev/null
+sips -z 36 36 "${PROJECT_DIR}/Packaging/StatusIcon-source.png" \
+    --out "${PROJECT_DIR}/Packaging/StatusIcon@2x.png" >/dev/null
 echo "Built ${OUTPUT_ICON}"

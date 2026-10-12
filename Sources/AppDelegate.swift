@@ -23,25 +23,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `swift run` 启动的是普通可执行文件，不一定会自动采用 GUI 应用的激活策略。
         // 显式设置后，输入框才能稳定接收键盘事件，而不是把输入继续发送给 Terminal。
-        NSApp.setActivationPolicy(.accessory)
+        // 保留 Dock 图标，关闭或隐藏窗口后仍可从 Dock 重新打开。
+        NSApp.setActivationPolicy(.regular)
         setupStatusItem()
         hotkeyObserver = NotificationCenter.default.addObserver(
             forName: .captureHotkeyChanged, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.configureGlobalHotkey()
-            self?.updateCaptureMenuTitle()
+            // queue: .main 保证同步回调在主队列；明确交给 MainActor 检查。
+            MainActor.assumeIsolated {
+                self?.configureGlobalHotkey()
+                self?.updateCaptureMenuTitle()
+            }
         }
         clipboardHotkeyObserver = NotificationCenter.default.addObserver(
             forName: .clipboardHotkeyChanged, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.configureGlobalHotkey()
-            self?.updateClipboardMenuTitle()
+            MainActor.assumeIsolated {
+                self?.configureGlobalHotkey()
+                self?.updateClipboardMenuTitle()
+            }
         }
         translationObserver = NotificationCenter.default.addObserver(
             forName: .translationCompleted, object: nil, queue: .main
         ) { [weak self] notification in
             guard let result = notification.object as? TranslationDisplayResult else { return }
-            if let self { self.translationPanelController.show(result, store: self.store) }
+            MainActor.assumeIsolated {
+                if let self { self.translationPanelController.show(result, store: self.store) }
+            }
         }
         configureGlobalHotkey()
         checkRequiredPermissions()
@@ -50,6 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // 无论其他面板是否可见，都恢复应用自己持有的主窗口。
+        showMainWindow()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -66,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // NSStatusItem 必须由 AppDelegate 强引用，否则创建后会立即从菜单栏消失。
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "多多翻译")
+            button.image = Self.makeStatusIcon()
             button.imagePosition = .imageOnly
             button.toolTip = "多多翻译"
         }
@@ -87,6 +101,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.items.forEach { $0.target = self }
         item.menu = menu
         statusItem = item
+    }
+
+    private static func makeStatusIcon() -> NSImage? {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
+        for name in ["StatusIcon", "StatusIcon@2x"] {
+            guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+                  let data = try? Data(contentsOf: url),
+                  let representation = NSBitmapImageRep(data: data) else { continue }
+            representation.size = size
+            image.addRepresentation(representation)
+        }
+        guard !image.representations.isEmpty else {
+            return NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "多多翻译")
+        }
+        // 使用 alpha 轮廓，由 macOS 按明暗主题和菜单选中状态着色。
+        image.isTemplate = true
+        return image
     }
 
     private func updateCaptureMenuTitle() {
