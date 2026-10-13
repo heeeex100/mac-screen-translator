@@ -39,10 +39,10 @@ cd mac-screen-translator
 CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./Scripts/build-app.sh
 ```
 
-构建完成后，应用位于 `dist/MacScreenTranslator.app`：
+构建完成后，应用位于 `dist/多多翻译.app`：
 
 ```bash
-open dist/MacScreenTranslator.app
+open dist/多多翻译.app
 ```
 
 脚本会执行 Release 构建、签名和签名校验。没有可用的证书时，脚本会直接报错，不会退回到 ad-hoc 签名。
@@ -67,7 +67,7 @@ DeepSeek 默认模型是 `deepseek-flash`，OpenAI 默认模型是 `gpt-4o-mini`
 | 仅 OCR | — | 框选区域并识别文字，结果自动复制到剪贴板 |
 | 翻译编辑后的原文 | `⌘ Enter` | 修改“识别原文”后重新提交翻译 |
 
-截图翻译和 OCR 也可以从菜单栏图标或主窗口中执行。看到文字后按下“框选翻译”快捷键，再拖出包含文字的区域即可识别和翻译；快捷键可以在“设置”中重新录制。
+截图翻译和 OCR 也可以从菜单栏图标或主窗口中执行。看到文字后按下“框选翻译”快捷键，再拖出包含文字的区域，松开后按 Enter 或点击“确认”开始识别和翻译。确认前可再次拖动重选，按 Esc 或点击“取消”退出框选；快捷键可以在“设置”中重新录制。
 
 ## 🔐 系统权限
 
@@ -89,10 +89,12 @@ swift build
 
 ```bash
 CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' ./Scripts/build-app.sh
-open dist/MacScreenTranslator.app
+open dist/多多翻译.app
 ```
 
 日常测试建议使用打包后的 App。这样可以保持应用身份稳定，避免 `swift run`、Xcode 运行和打包应用之间反复切换导致隐私权限失效。
+
+翻译请求进行中也可再次框选或翻译剪贴板，新操作会取消旧请求；截图识别或翻译过程中可点击“取消并重选”。翻译完成后，结果窗口会自动显示在前台。
 
 ## 🧪 单元测试
 
@@ -102,7 +104,7 @@ open dist/MacScreenTranslator.app
 swift test
 ```
 
-目前包含 20 个 XCTest 用例，覆盖学习笔记解析、截图坐标换算和快捷键显示，不访问网络、钥匙串或屏幕录制权限。覆盖范围与调试方法见 [单元测试说明](./docs/单元测试说明.md)。
+目前包含 44 个 XCTest 用例，覆盖学习笔记解析、翻译与学习笔记异步请求隔离、截图坐标换算、OCR 阅读顺序、快捷键显示及注册回滚，不访问网络、钥匙串或屏幕录制权限。覆盖范围与调试方法见 [单元测试说明](./docs/单元测试说明.md)。
 
 ## 🧱 技术栈
 

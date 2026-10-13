@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
-APP_NAME="MacScreenTranslator"
+APP_NAME="多多翻译"
+EXECUTABLE_NAME="MacScreenTranslator"
 OUTPUT_DIR="${1:-${PROJECT_DIR}/dist}"
 APP_BUNDLE="${OUTPUT_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
@@ -27,14 +28,23 @@ fi
 swift build -c release --package-path "${PROJECT_DIR}"
 BIN_DIR=$(swift build -c release --package-path "${PROJECT_DIR}" --show-bin-path)
 
+# Rename the previous bundle without leaving a second searchable copy.
+LEGACY_APP_BUNDLE="${OUTPUT_DIR}/${EXECUTABLE_NAME}.app"
+if [[ ! -e "${APP_BUNDLE}" && -d "${LEGACY_APP_BUNDLE}" ]]; then
+    LEGACY_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "${LEGACY_APP_BUNDLE}/Contents/Info.plist" 2>/dev/null || true)
+    if [[ "${LEGACY_BUNDLE_ID}" == "com.yangchenjie.mac-screen-translator" ]]; then
+        mv "${LEGACY_APP_BUNDLE}" "${APP_BUNDLE}"
+    fi
+fi
+
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
-cp "${BIN_DIR}/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
+cp "${BIN_DIR}/${EXECUTABLE_NAME}" "${MACOS_DIR}/${EXECUTABLE_NAME}"
 cp "${PROJECT_DIR}/Packaging/Info.plist" "${CONTENTS_DIR}/Info.plist"
 cp "${PROJECT_DIR}/Packaging/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 cp "${PROJECT_DIR}/Packaging/AppIcon.png" "${RESOURCES_DIR}/AppIcon.png"
 cp "${PROJECT_DIR}/Packaging/StatusIcon.png" "${RESOURCES_DIR}/StatusIcon.png"
 cp "${PROJECT_DIR}/Packaging/StatusIcon@2x.png" "${RESOURCES_DIR}/StatusIcon@2x.png"
-chmod 755 "${MACOS_DIR}/${APP_NAME}"
+chmod 755 "${MACOS_DIR}/${EXECUTABLE_NAME}"
 
 codesign --force --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
 codesign --verify --strict --verbose=2 "${APP_BUNDLE}"

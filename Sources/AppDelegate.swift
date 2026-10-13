@@ -7,13 +7,10 @@ import CoreGraphics
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = TranslationStore()
     let visibilityController = AppVisibilityController()
-    private var hotKey: EventHotKeyRef?
-    private var clipboardHotKey: EventHotKeyRef?
+    private var hotKeyRegistry: HotKeyRegistry<EventHotKeyRef>?
     private var eventHandler: EventHandlerRef?
     private var selectionOverlay: SelectionOverlay?
     private var hotkeyEnabled = true
-    private var hotkeyObserver: NSObjectProtocol?
-    private var clipboardHotkeyObserver: NSObjectProtocol?
     private var statusItem: NSStatusItem?
     private var captureMenuItem: NSMenuItem?
     private var clipboardMenuItem: NSMenuItem?
@@ -26,23 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 保留 Dock 图标，关闭或隐藏窗口后仍可从 Dock 重新打开。
         NSApp.setActivationPolicy(.regular)
         setupStatusItem()
-        hotkeyObserver = NotificationCenter.default.addObserver(
-            forName: .captureHotkeyChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            // queue: .main 保证同步回调在主队列；明确交给 MainActor 检查。
-            MainActor.assumeIsolated {
-                self?.configureGlobalHotkey()
-                self?.updateCaptureMenuTitle()
-            }
-        }
-        clipboardHotkeyObserver = NotificationCenter.default.addObserver(
-            forName: .clipboardHotkeyChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.configureGlobalHotkey()
-                self?.updateClipboardMenuTitle()
-            }
-        }
         translationObserver = NotificationCenter.default.addObserver(
             forName: .translationCompleted, object: nil, queue: .main
         ) { [weak self] notification in
@@ -67,11 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let hotKey { UnregisterEventHotKey(hotKey) }
-        if let clipboardHotKey { UnregisterEventHotKey(clipboardHotKey) }
+        _ = hotKeyRegistry?.setEnabled(false)
         if let eventHandler { RemoveEventHandler(eventHandler) }
-        if let hotkeyObserver { NotificationCenter.default.removeObserver(hotkeyObserver) }
-        if let clipboardHotkeyObserver { NotificationCenter.default.removeObserver(clipboardHotkeyObserver) }
         if let translationObserver { NotificationCenter.default.removeObserver(translationObserver) }
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
     }
@@ -173,38 +150,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureGlobalHotkey() {
-        // Carbon 热键可以在应用不活跃时工作，也不需要辅助功能权限。
-        // 每次设置变化时先注销旧热键，避免同一个按键触发多个框选窗口。
-        if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
-        if let clipboardHotKey { UnregisterEventHotKey(clipboardHotKey); self.clipboardHotKey = nil }
-        guard hotkeyEnabled else { return }
-        let capture = store.captureShortcut
-        let clipboard = store.clipboardShortcut
-        guard capture.keyCode != clipboard.keyCode || capture.modifiers != clipboard.modifiers else {
-            store.status = "两个快捷键不能设置为同一组合键。"
-            return
-        }
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        if eventHandler == nil {
+        if hotKeyRegistry == nil {
+            var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
             let userData = Unmanaged.passUnretained(self).toOpaque()
-            InstallEventHandler(GetApplicationEventTarget(), hotKeyHandler, 1, &eventType, userData, &eventHandler)
+            let status = InstallEventHandler(GetApplicationEventTarget(), hotKeyHandler, 1, &eventType, userData, &eventHandler)
+            guard status == noErr else {
+                store.shortcutError = "快捷键事件处理器安装失败，请重启应用。"
+                return
+            }
+            let capture = store.captureShortcut
+            let clipboard = store.clipboardShortcut
+            hotKeyRegistry = HotKeyRegistry(shortcuts: [
+                .capture: HotKeyShortcut(keyCode: capture.keyCode, modifiers: capture.modifiers),
+                .clipboard: HotKeyShortcut(keyCode: clipboard.keyCode, modifiers: clipboard.modifiers)
+            ], register: { action, shortcut in
+                var handle: EventHotKeyRef?
+                let id = EventHotKeyID(signature: OSType(0x5354524E), id: action.id)
+                let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, id,
+                                                GetApplicationEventTarget(), 0, &handle)
+                return status == noErr ? handle : nil
+            }, unregister: { UnregisterEventHotKey($0) })
+            store.registerShortcut = { [weak self] action, shortcut in
+                guard let self, let registry = self.hotKeyRegistry else { return "快捷键服务尚未就绪。" }
+                let error = registry.update(action, to: shortcut)
+                if error == nil {
+                    // setter 在回调返回后保存配置，下一轮刷新菜单。
+                    DispatchQueue.main.async { [weak self] in
+                        self?.updateCaptureMenuTitle()
+                        self?.updateClipboardMenuTitle()
+                    }
+                }
+                return error
+            }
         }
-        let hotKeyID = EventHotKeyID(signature: OSType(0x5354524E), id: 1) // STRN
-        let captureStatus = RegisterEventHotKey(capture.keyCode, capture.modifiers, hotKeyID,
-                                                GetApplicationEventTarget(), 0, &hotKey)
-        guard captureStatus == noErr else {
-            hotKey = nil
-            store.status = "截图快捷键注册失败，可能已被其他应用占用。"
-            return
-        }
-        let clipboardID = EventHotKeyID(signature: OSType(0x5354524E), id: 2) // STRN
-        let clipboardStatus = RegisterEventHotKey(clipboard.keyCode, clipboard.modifiers, clipboardID,
-                                                  GetApplicationEventTarget(), 0, &clipboardHotKey)
-        guard clipboardStatus == noErr else {
-            if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
-            clipboardHotKey = nil
-            store.status = "剪贴板快捷键注册失败，可能已被其他应用占用。"
-            return
+        let errors = hotKeyRegistry?.setEnabled(hotkeyEnabled) ?? []
+        if !errors.isEmpty {
+            store.shortcutError = errors.joined(separator: "\n")
+            store.status = errors.joined(separator: " ")
         }
     }
 
@@ -227,15 +209,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    enum CaptureMode { case translation, ocr }
+    typealias CaptureMode = CaptureOperation
 
     func captureRequested(mode: CaptureMode = .translation) {
         // 系统可能重复投递同一次热键事件。持有唯一遮罩，直到框选完成或取消，
         // 可以防止叠出两个遮罩、要求用户框选两次。
-        guard !store.isTranslating else {
-            AppLogger.shared.info("忽略框选请求：当前已有任务在执行")
-            return
-        }
         guard selectionOverlay == nil else {
             AppLogger.shared.info("忽略框选请求：框选面板已经存在")
             return
@@ -246,21 +224,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.shared.error("框选失败：找不到当前屏幕")
             return
         }
+        store.prepareForCapture()
+        translationPanelController.hide()
         let mainWindowWasVisible = visibilityController.hideMainWindowForCapture()
         store.status = mode == .ocr ? "请框选要识别的区域…" : "请框选要翻译的区域…"
         AppLogger.shared.info("开始框选：模式=\(mode == .ocr ? "OCR" : "翻译")，屏幕=\(screen.frame)")
+        var submitted = false
         selectionOverlay = SelectionOverlay.present(
             on: screen,
             completion: { [weak self] rect in
                 guard let self else { return }
+                submitted = true
                 if mode == .ocr { self.store.recognize(selection: rect, on: screen) }
                 else { self.store.translate(selection: rect, on: screen) }
-                // 截图已在上面的调用中同步完成，现在可以恢复主窗口。
-                self.visibilityController.restoreMainWindowAfterCapture(wasVisible: mainWindowWasVisible)
             },
             onDismiss: { [weak self] in
                 guard let self else { return }
                 self.selectionOverlay = nil
+                if !submitted { self.store.status = "框选已取消。" }
                 AppLogger.shared.info("框选结束或取消")
                 self.visibilityController.restoreMainWindowAfterCapture(wasVisible: mainWindowWasVisible)
             }

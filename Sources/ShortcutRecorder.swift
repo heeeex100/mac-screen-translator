@@ -82,6 +82,7 @@ final class ShortcutRecorderButton: NSButton {
             return
         }
         isRecording = false
+        title = previousTitle
         onRecord?(UInt32(event.keyCode), modifiers)
         window?.makeFirstResponder(nil)
         stopMonitoring()

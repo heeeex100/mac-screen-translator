@@ -15,9 +15,14 @@ final class TranslationResultPanelController: NSObject, NSWindowDelegate {
         let panel = panel ?? makePanel()
         panel.contentView = NSHostingView(rootView: FloatingTranslationView(result: result, store: store))
         position(panel)
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
         self.panel = panel
     }
+
+    func hide() { panel?.orderOut(nil) }
 
     private func makePanel() -> NSPanel {
         let panel = NSPanel(
@@ -59,6 +64,10 @@ private struct FloatingTranslationView: View {
     @ObservedObject var store: TranslationStore
     @State private var learningExpanded = false
 
+    private var isCurrentResult: Bool {
+        !store.isTranslating && result.source == store.source && result.translation == store.translation
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 14) {
@@ -71,7 +80,7 @@ private struct FloatingTranslationView: View {
                         }
                     }
                     Spacer()
-                    if store.canLearnCurrentText {
+                    if isCurrentResult && store.canLearnCurrentText {
                         Button {
                             learningExpanded.toggle()
                             if learningExpanded && store.learningNote == nil { store.loadLearningNote() }
@@ -91,7 +100,7 @@ private struct FloatingTranslationView: View {
                     .padding(14)
                     .warmCard(radius: 16)
 
-                if learningExpanded {
+                if learningExpanded && isCurrentResult {
                     learningContent
                 }
 

@@ -4,12 +4,12 @@ import Vision
 import SwiftUI
 
 extension Notification.Name {
-    static let captureHotkeyChanged = Notification.Name("captureHotkeyChanged")
-    static let clipboardHotkeyChanged = Notification.Name("clipboardHotkeyChanged")
     static let openTranslationSettings = Notification.Name("openTranslationSettings")
     static let translationCompleted = Notification.Name("translationCompleted")
     static let ocrCompleted = Notification.Name("ocrCompleted")
 }
+
+enum CaptureOperation { case translation, ocr }
 
 enum TranslationState: Equatable {
     case idle
@@ -43,14 +43,26 @@ enum APIProvider: String, CaseIterable, Identifiable {
 /// 保存界面状态，并串联截图、Vision OCR 和可切换的翻译服务。
 @MainActor
 final class TranslationStore: ObservableObject {
-    @Published var source = ""
-    @Published var translation = ""
+    @Published var source = "" {
+        didSet { if source != oldValue { invalidateLearningNote() } }
+    }
+    @Published var translation = "" {
+        didSet { if translation != oldValue { invalidateLearningNote() } }
+    }
     @Published var learningNote: LearningNote?
     @Published var isLoadingLearningNote = false
     @Published var status = "准备就绪。使用下方按钮或菜单栏快捷键框选翻译。"
     @Published var isTranslating = false
     @Published var apiKey: String
     @Published var apiKeyStorageError: String?
+    @Published var shortcutError: String?
+    var registerShortcut: ((HotKeyAction, HotKeyShortcut) -> String?)?
+    typealias LearningOperation = (String, String, String, String, APIProvider) async throws -> LearningNote
+    typealias TranslationOperation = (String, String, String, String, APIProvider) async throws -> String
+    private let translationOperation: TranslationOperation
+    @Published private(set) var activeCaptureMode: CaptureOperation?
+    private let learningOperation: LearningOperation
+    private let learningTask = LearningNoteTask()
     @Published private(set) var state: TranslationState = .idle
 
     @AppStorage("apiProvider") var providerRaw = APIProvider.deepSeek.rawValue
@@ -62,26 +74,35 @@ final class TranslationStore: ObservableObject {
     @AppStorage("clipboardHotKeyCode") private var clipboardHotKeyCode = Int(kVK_ANSI_V)
     @AppStorage("clipboardHotKeyModifiers") private var clipboardHotKeyModifiers = Int(controlKey | shiftKey)
 
-    init() {
+    init(apiKey: String? = nil, learningOperation: LearningOperation? = nil,
+         translationOperation: TranslationOperation? = nil) {
+        self.translationOperation = translationOperation ?? { text, key, model, language, provider in
+            try await Self.callChatCompletion(text: text, apiKey: key, model: model, targetLanguage: language, provider: provider)
+        }
+        self.learningOperation = learningOperation ?? { text, translation, key, model, provider in
+            try await Self.callLearning(text: text, translation: translation, apiKey: key, model: model, provider: provider)
+        }
+        // 注入密钥和请求以便测试异步流程，不访问钥匙串或真实 API。
+        if let apiKey { self.apiKey = apiKey; return }
         AppLogger.shared.info("应用启动")
         let provider = APIProvider(rawValue: UserDefaults.standard.string(forKey: "apiProvider") ?? "deepseek") ?? .deepSeek
         // 首次升级时，把旧版本 UserDefaults 中的明文 Key 一次性迁移到钥匙串。
         let legacyKey = UserDefaults.standard.string(forKey: "deepseekAPIKey") ?? ""
         do {
             if let storedKey = try KeychainStore.loadAPIKey(provider: provider) {
-                apiKey = storedKey
+                self.apiKey = storedKey
                 apiKeyStorageError = nil
             } else if provider == .deepSeek && !legacyKey.isEmpty {
                 try KeychainStore.saveAPIKey(legacyKey, provider: .deepSeek)
-                apiKey = legacyKey
+                self.apiKey = legacyKey
                 apiKeyStorageError = nil
                 UserDefaults.standard.removeObject(forKey: "deepseekAPIKey")
             } else {
-                apiKey = ""
+                self.apiKey = ""
                 apiKeyStorageError = nil
             }
         } catch {
-            apiKey = legacyKey
+            self.apiKey = legacyKey
             apiKeyStorageError = error.localizedDescription
         }
     }
@@ -132,17 +153,30 @@ final class TranslationStore: ObservableObject {
     }
 
     func setCaptureShortcut(keyCode: UInt32, modifiers: UInt32) {
+        guard acceptShortcut(.capture, keyCode: keyCode, modifiers: modifiers) else { return }
         captureHotKeyCode = Int(keyCode)
         captureHotKeyModifiers = Int(modifiers)
         objectWillChange.send()
-        NotificationCenter.default.post(name: .captureHotkeyChanged, object: nil)
     }
 
     func setClipboardShortcut(keyCode: UInt32, modifiers: UInt32) {
+        guard acceptShortcut(.clipboard, keyCode: keyCode, modifiers: modifiers) else { return }
         clipboardHotKeyCode = Int(keyCode)
         clipboardHotKeyModifiers = Int(modifiers)
         objectWillChange.send()
-        NotificationCenter.default.post(name: .clipboardHotkeyChanged, object: nil)
+    }
+
+    private func acceptShortcut(_ action: HotKeyAction, keyCode: UInt32, modifiers: UInt32) -> Bool {
+        let other = action == .capture ? clipboardShortcut : captureShortcut
+        if other.keyCode == keyCode && other.modifiers == modifiers {
+            shortcutError = "两个快捷键不能设置为同一组合键，已保留原配置。"
+        } else if let registerShortcut {
+            shortcutError = registerShortcut(action, HotKeyShortcut(keyCode: keyCode, modifiers: modifiers))
+        } else {
+            shortcutError = "快捷键服务尚未就绪，请稍后重试。"
+        }
+        if let shortcutError { status = shortcutError; return false }
+        return true
     }
 
     func translate(selection: NSRect, on screen: NSScreen) {
@@ -150,7 +184,7 @@ final class TranslationStore: ObservableObject {
         source = ""
         translation = ""
         learningNote = nil
-        beginRequest(.recognizing)
+        beginRequest(.recognizing, captureMode: .translation)
         status = "正在识别文字…"
         let languages = recognitionLanguages()
         let requestID = activeRequestID
@@ -188,7 +222,6 @@ final class TranslationStore: ObservableObject {
 
     /// 只执行 OCR，不访问翻译服务，并自动把识别结果复制到剪贴板。
     func recognize(selection: NSRect, on screen: NSScreen) {
-        guard !isTranslating else { return }
         guard let image = screenshot(selection: selection, screen: screen) else {
             fail("截图失败，请在系统设置中允许屏幕录制。")
             return
@@ -196,7 +229,7 @@ final class TranslationStore: ObservableObject {
         source = ""
         translation = ""
         learningNote = nil
-        beginRequest(.recognizing)
+        beginRequest(.recognizing, captureMode: .ocr)
         status = "正在识别文字…"
         let languages = recognitionLanguages()
         let requestID = activeRequestID
@@ -228,68 +261,56 @@ final class TranslationStore: ObservableObject {
         }
     }
 
-    func translateInput(_ text: String) {
+    @discardableResult
+    func translateInput(_ text: String) -> Task<Void, Never>? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { status = "请输入要翻译的文字。"; return }
-        guard !isTranslating else { return }
-        beginTextTranslation(value, status: "正在翻译输入文字…")
+        guard !value.isEmpty else { status = "请输入要翻译的文字。"; return nil }
+        return beginTextTranslation(value, status: "正在翻译输入文字…")
     }
 
-    private func beginTextTranslation(_ text: String, status: String) {
+    private func beginTextTranslation(_ text: String, status: String) -> Task<Void, Never>? {
+        beginRequest(.translating)
         source = text
         translation = ""
-        learningNote = nil
         guard !apiKey.isEmpty else {
             self.status = "已读取原文；请先在设置中填写 \(provider.title) API Key。"
             state = .idle
-            return
+            isTranslating = false
+            return nil
         }
-        beginRequest(.translating)
         self.status = status
         let requestID = activeRequestID
-        activeTask = Task { [weak self] in
+        let task = Task { [weak self] in
             guard let self else { return }
             do { try await self.translateRecognizedText(text, requestID: requestID) }
             catch is CancellationError { guard self.activeRequestID == requestID else { return }; self.cancelled() }
             catch { guard self.activeRequestID == requestID else { return }; self.fail(error.localizedDescription) }
         }
+        activeTask = task
+        return task
     }
 
-    /// 读取当前剪贴板中的纯文本，并复用截图翻译的网络流程。
     func translateClipboard() {
-        guard !isTranslating else { return }
-        guard let clipboardText = NSPasteboard.general.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !clipboardText.isEmpty else {
+        guard let text = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             status = "剪贴板中没有可翻译的文字。"
             return
         }
+        _ = beginTextTranslation(text, status: "正在翻译剪贴板文字…")
+    }
 
-        source = clipboardText
-        translation = ""
-        learningNote = nil
-
-        guard !apiKey.isEmpty else {
-            status = "已读取剪贴板文字；请先在设置中填写 \(provider.title) API Key。"
-            state = .idle
-            return
-        }
-
-        beginRequest(.translating)
-        status = "正在翻译剪贴板文字…"
-        let requestID = activeRequestID
-        activeTask = Task { [weak self] in
-            guard let self else { return }
-            do { try await self.translateRecognizedText(clipboardText, requestID: requestID) }
-            catch is CancellationError { guard self.activeRequestID == requestID else { return }; self.cancelled() }
-            catch { guard self.activeRequestID == requestID else { return }; self.fail(error.localizedDescription) }
-        }
+    /// 立即停止旧任务，允许框选而不等待旧服务请求完成。
+    func prepareForCapture() {
+        invalidateActiveTranslation()
+        invalidateLearningNote()
+        activeCaptureMode = nil
+        state = .idle
+        isTranslating = false
     }
 
     func cancelTranslation() {
-        activeTask?.cancel()
-        activeTask = nil
-        activeRequestID = UUID()
+        invalidateActiveTranslation()
+        invalidateLearningNote()
         cancelled()
     }
 
@@ -310,9 +331,17 @@ final class TranslationStore: ObservableObject {
     private var lastRequestText: String?
     private var activeRequestID = UUID()
 
-    private func beginRequest(_ newState: TranslationState) {
-        lastRequestText = nil
+    private func invalidateActiveTranslation() {
+        activeTask?.cancel()
+        activeTask = nil
         activeRequestID = UUID()
+    }
+
+    private func beginRequest(_ newState: TranslationState, captureMode: CaptureOperation? = nil) {
+        invalidateActiveTranslation()
+        invalidateLearningNote()
+        activeCaptureMode = captureMode
+        lastRequestText = nil
         state = newState
         isTranslating = newState == .recognizing || newState == .translating
     }
@@ -334,7 +363,7 @@ final class TranslationStore: ObservableObject {
     private func translateRecognizedText(_ text: String, requestID: UUID) async throws {
         lastRequestText = text
         AppLogger.shared.info("开始翻译：原文长度 \(text.count)，模型 \(model)，目标语言 \(targetLanguage)")
-        let result = try await Self.callChatCompletion(text: text, apiKey: apiKey, model: model, targetLanguage: targetLanguage, provider: provider)
+        let result = try await translationOperation(text, apiKey, model, targetLanguage, provider)
         try Task.checkCancellation()
         guard activeRequestID == requestID else { return }
         translation = result
@@ -353,19 +382,33 @@ final class TranslationStore: ObservableObject {
         return compact.count >= 8 && words.count >= 4 && !basic.contains(compact.lowercased())
     }
 
-    func loadLearningNote() {
-        guard canLearnCurrentText, !isLoadingLearningNote, !translation.isEmpty else { return }
-        guard !apiKey.isEmpty else { status = "请先在设置中填写 \(provider.title) API Key。"; return }
+    private func invalidateLearningNote() {
+        learningTask.cancel()
+        learningNote = nil
+        isLoadingLearningNote = false
+    }
+
+    @discardableResult
+    func loadLearningNote() -> Task<Void, Never>? {
+        guard canLearnCurrentText, !isTranslating, !isLoadingLearningNote, !translation.isEmpty else { return nil }
+        guard !apiKey.isEmpty else { status = "请先在设置中填写 \(provider.title) API Key。"; return nil }
         isLoadingLearningNote = true
         let text = source
-        Task { [weak self] in
-            guard let self else { return }
-            defer { self.isLoadingLearningNote = false }
-            do {
-                self.learningNote = try await Self.callLearning(text: text, translation: translation, apiKey: self.apiKey, model: self.model, provider: self.provider)
+        let translated = translation
+        let key = apiKey
+        let selectedModel = model
+        let selectedProvider = provider
+        let operation = learningOperation
+        return learningTask.start(operation: {
+            try await operation(text, translated, key, selectedModel, selectedProvider)
+        }, completion: { [weak self] result in
+            guard let self, self.source == text, self.translation == translated else { return }
+            self.isLoadingLearningNote = false
+            switch result {
+            case .success(let note): self.learningNote = note
+            case .failure(let error): self.status = error.localizedDescription
             }
-            catch { self.status = error.localizedDescription }
-        }
+        })
     }
 
     private func screenshot(selection: NSRect, screen: NSScreen) -> CGImage? {
@@ -402,61 +445,12 @@ final class TranslationStore: ObservableObject {
         return formatRecognizedText(request.results ?? [])
     }
 
-    /// Vision 返回的 observation 顺序未定义。先按纵向重叠分组为行，再按列和行排序，
-    /// 保留列布局与段落间距；每行中的候选文字按 x 坐标排列。
     private nonisolated static func formatRecognizedText(_ observations: [VNRecognizedTextObservation]) -> String {
-        struct Item { let text: String; let box: CGRect }
-        let items = observations.compactMap { observation -> Item? in
+        let items = observations.compactMap { observation -> OCRTextFormatter.Item? in
             guard let text = observation.topCandidates(1).first?.string else { return nil }
-            return Item(text: text, box: observation.boundingBox)
+            return OCRTextFormatter.Item(text: text, box: observation.boundingBox)
         }
-        guard !items.isEmpty else { return "" }
-        var lines: [[Item]] = []
-        for item in items.sorted(by: { $0.box.midY > $1.box.midY }) {
-            if let index = lines.firstIndex(where: { line in
-                let minY = line.map { $0.box.minY }.min()!
-                let maxY = line.map { $0.box.maxY }.max()!
-                let overlap = min(maxY, item.box.maxY) - max(minY, item.box.minY)
-                return overlap > min(item.box.height, maxY - minY) * 0.35 || abs(item.box.midY - (minY + maxY) / 2) < max(item.box.height, maxY - minY) * 0.45
-            }) {
-                lines[index].append(item)
-            } else { lines.append([item]) }
-        }
-        lines = lines.map { line in
-            line.sorted { left, right in left.box.minX < right.box.minX }
-        }
-        lines.sort { upper, lower in
-            let upperY = upper.map { $0.box.midY }.reduce(0, +) / CGFloat(upper.count)
-            let lowerY = lower.map { $0.box.midY }.reduce(0, +) / CGFloat(lower.count)
-            return upperY > lowerY
-        }
-
-        // 将明显分离的 x 区域视为独立栏，栏内仍按从上到下读取。
-        let medianHeight = items.map(\.box.height).sorted()[items.count / 2]
-        let columnGap = max(0.06, medianHeight * 2.5)
-        var columns: [[ [Item] ]] = []
-        for line in lines {
-            let minX = line.first!.box.minX
-            if let index = columns.firstIndex(where: { column in
-                let right = column.flatMap { $0 }.map { $0.box.maxX }.max() ?? 0
-                return minX <= right + columnGap
-            }) { columns[index].append(line) } else { columns.append([line]) }
-        }
-        columns.sort { ($0.flatMap { $0 }.map { $0.box.minX }.min() ?? 0) < ($1.flatMap { $0 }.map { $0.box.minX }.min() ?? 0) }
-        var output: [String] = []
-        for column in columns {
-            let ordered = column.sorted { ($0.first?.box.midY ?? 0) > ($1.first?.box.midY ?? 0) }
-            for (index, line) in ordered.enumerated() {
-                if index > 0,
-                   let previous = ordered[index - 1].first,
-                   let current = line.first,
-                   previous.box.minY - current.box.maxY > medianHeight * 1.8 {
-                    output.append("")
-                }
-                output.append(line.map(\.text).joined(separator: " "))
-            }
-        }
-        return output.joined(separator: "\n")
+        return OCRTextFormatter.format(items)
     }
 
     private func recognitionLanguages() -> [String] {

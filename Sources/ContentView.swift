@@ -129,7 +129,6 @@ struct ContentView: View {
         }
         .padding(17)
         .warmCard()
-        .disabled(store.isTranslating)
     }
 
     private func actionButton(_ title: String, detail: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -160,6 +159,11 @@ struct ContentView: View {
             if store.isTranslating {
                 ProgressView().controlSize(.small)
                 Button("取消") { store.cancelTranslation() }.buttonStyle(WarmButtonStyle())
+                if let mode = store.activeCaptureMode {
+                    Button("取消并重选") {
+                        if mode == .ocr { recognize() } else { capture() }
+                    }.buttonStyle(WarmButtonStyle())
+                }
             } else if !store.source.isEmpty && store.state == .failed {
                 Button("重试") { store.retryLastTranslation() }.buttonStyle(WarmButtonStyle())
             }
@@ -314,6 +318,9 @@ private struct SettingsView: View {
                         }
                     }
                     settingsSection("快捷操作", icon: "keyboard") {
+                        if let error = store.shortcutError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
                         shortcutRow("框选翻译", title: store.captureShortcutTitle) { keyCode, modifiers in
                             store.setCaptureShortcut(keyCode: keyCode, modifiers: modifiers)
                         }
