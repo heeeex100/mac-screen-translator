@@ -97,7 +97,7 @@ final class LearningNoteTaskTests: XCTestCase {
         gate.continuation?.resume(throwing: NSError(domain: "old", code: 1))
         await task?.value
         XCTAssertNil(store.learningNote)
-        XCTAssertEqual(store.status, "准备就绪。使用下方按钮或菜单栏快捷键框选翻译。")
+        XCTAssertEqual(store.status, "准备就绪。输入原文，或使用上方按钮获取文字。")
     }
 
     func testStoreOldCompletionCannotClearNewRequestLoadingState() async {
@@ -135,6 +135,7 @@ final class LearningNoteTaskTests: XCTestCase {
         gate.continuation?.resume(throwing: error)
         await task?.value
         XCTAssertEqual(store.status, "测试请求失败")
+        XCTAssertEqual(store.learningError, "测试请求失败")
         XCTAssertFalse(store.isLoadingLearningNote)
         XCTAssertNil(store.learningNote)
     }

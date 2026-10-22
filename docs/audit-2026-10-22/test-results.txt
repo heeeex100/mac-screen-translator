@@ -1,0 +1,180 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/11] Compiling MacScreenTranslator TranslationStore.swift
+[5/11] Compiling MacScreenTranslator AppDelegate.swift
+[6/11] Compiling MacScreenTranslator ImageRecognition.swift
+[7/11] Emitting module MacScreenTranslator
+[8/11] Compiling MacScreenTranslator ContentView.swift
+[8/13] Write Objects.LinkFileList
+[9/13] Linking MacScreenTranslator
+[10/13] Applying MacScreenTranslator
+[12/15] Emitting module MacScreenTranslatorTests
+[13/15] Compiling MacScreenTranslatorTests ImageInputTests.swift
+[13/15] Write Objects.LinkFileList
+[14/15] Linking MacScreenTranslatorPackageTests
+Build complete! (3.74s)
+Test Suite 'All tests' started at 2026-10-22 17:55:05.745.
+Test Suite 'MacScreenTranslatorPackageTests.xctest' started at 2026-10-22 17:55:05.746.
+Test Suite 'HotKeyRegistryTests' started at 2026-10-22 17:55:05.746.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testDuplicateDoesNotUnregisterExistingShortcuts]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testDuplicateDoesNotUnregisterExistingShortcuts]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testFailedUpdateRestoresOnlyChangedShortcut]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testFailedUpdateRestoresOnlyChangedShortcut]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testRestoreFailureIsReportedWithoutLosingOtherShortcut]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testRestoreFailureIsReportedWithoutLosingOtherShortcut]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testStartupFailureDoesNotDisableOtherShortcut]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testStartupFailureDoesNotDisableOtherShortcut]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testStoreRejectsConflictAndRegistrationFailureWithoutSaving]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testStoreRejectsConflictAndRegistrationFailureWithoutSaving]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testSuccessfulChangeLeavesOtherShortcutRegistered]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testSuccessfulChangeLeavesOtherShortcutRegistered]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testUpdatesAreValidatedWhileSettingsPauseHotkeys]' started.
+Test Case '-[MacScreenTranslatorTests.HotKeyRegistryTests testUpdatesAreValidatedWhileSettingsPauseHotkeys]' passed (0.000 seconds).
+Test Suite 'HotKeyRegistryTests' passed at 2026-10-22 17:55:05.748.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'ImageInputTests' started at 2026-10-22 17:55:05.748.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testAutomaticVisionReadsChineseAndEnglish]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testAutomaticVisionReadsChineseAndEnglish]' passed (0.434 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testClipboardImageRecognizesThenTranslates]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testClipboardImageRecognizesThenTranslates]' passed (0.025 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testClipboardTextBypassesImageRecognition]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testClipboardTextBypassesImageRecognition]' passed (0.002 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testEmptyClipboardDoesNotStartRequest]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testEmptyClipboardDoesNotStartRequest]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testImageRequestUsesSettingsSnapshotAndRejectsLateRecognition]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testImageRequestUsesSettingsSnapshotAndRejectsLateRecognition]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testImageTakesPriorityOverAccompanyingText]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testImageTakesPriorityOverAccompanyingText]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testLocalVisionReadsGeneratedImage]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testLocalVisionReadsGeneratedImage]' passed (0.063 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testMissingTranslationKeyStillPreservesRecognizedText]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testMissingTranslationKeyStillPreservesRecognizedText]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testNoRecognizedTextDoesNotCallTranslation]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testNoRecognizedTextDoesNotCallTranslation]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testReadsPNGAndTIFFClipboardImages]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testReadsPNGAndTIFFClipboardImages]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testReadsTrimmedTextAndEmptyClipboard]' started.
+Test Case '-[MacScreenTranslatorTests.ImageInputTests testReadsTrimmedTextAndEmptyClipboard]' passed (0.001 seconds).
+Test Suite 'ImageInputTests' passed at 2026-10-22 17:55:06.277.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.528 (0.529) seconds
+Test Suite 'LearningNoteParserTests' started at 2026-10-22 17:55:06.277.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testAcceptsExplanationAroundJSON]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testAcceptsExplanationAroundJSON]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testAcceptsMarkdownCodeFence]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testAcceptsMarkdownCodeFence]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testDoesNotStripLabelsInsideActualContent]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testDoesNotStripLabelsInsideActualContent]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testMissingFieldsBecomeEmptyStrings]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testMissingFieldsBecomeEmptyStrings]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testPreservesUnicodeAndMultipleLines]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testPreservesUnicodeAndMultipleLines]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testRejectsMalformedJSONAndWrongFieldTypes]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testRejectsMalformedJSONAndWrongFieldTypes]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testRemovesLeadingLabelsAndSurroundingWhitespace]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteParserTests testRemovesLeadingLabelsAndSurroundingWhitespace]' passed (0.000 seconds).
+Test Suite 'LearningNoteParserTests' passed at 2026-10-22 17:55:06.279.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'LearningNoteTaskTests' started at 2026-10-22 17:55:06.279.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testCancelRejectsResultEvenIfOperationIgnoresCancellation]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testCancelRejectsResultEvenIfOperationIgnoresCancellation]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testCurrentFailureStillReportsErrorAndAllowsRetry]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testCurrentFailureStillReportsErrorAndAllowsRetry]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testLateSuccessDoesNotOverwriteNewResult]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testLateSuccessDoesNotOverwriteNewResult]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testOldFailureDoesNotClearNewLoadingStateOrReportError]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testOldFailureDoesNotClearNewLoadingStateOrReportError]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testStoreOldCompletionCannotClearNewRequestLoadingState]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testStoreOldCompletionCannotClearNewRequestLoadingState]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testStoreSnapshotsInputAndInvalidatesOnTextChangeWithoutAPIKey]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testStoreSnapshotsInputAndInvalidatesOnTextChangeWithoutAPIKey]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testStoreTranslationChangeCancelsLearning]' started.
+Test Case '-[MacScreenTranslatorTests.LearningNoteTaskTests testStoreTranslationChangeCancelsLearning]' passed (0.000 seconds).
+Test Suite 'LearningNoteTaskTests' passed at 2026-10-22 17:55:06.282.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'OCRTextFormatterTests' started at 2026-10-22 17:55:06.282.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testActualVisionBoxesFromWideImageReadByColumn]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testActualVisionBoxesFromWideImageReadByColumn]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testAdjacentFragmentsStayOnSameLine]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testAdjacentFragmentsStayOnSameLine]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testAlignedColumnsReadLeftThenRight]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testAlignedColumnsReadLeftThenRight]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testEmptyAndSingleItem]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testEmptyAndSingleItem]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testHeadingAboveColumnsDoesNotMergeColumns]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testHeadingAboveColumnsDoesNotMergeColumns]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testSingleColumnParagraphGapIsPreserved]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testSingleColumnParagraphGapIsPreserved]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testStaggeredColumnsStillReadByColumn]' started.
+Test Case '-[MacScreenTranslatorTests.OCRTextFormatterTests testStaggeredColumnsStillReadByColumn]' passed (0.000 seconds).
+Test Suite 'OCRTextFormatterTests' passed at 2026-10-22 17:55:06.283.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ScreenshotGeometryTests' started at 2026-10-22 17:55:06.283.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testFractionalSelectionExpandsToWholePixelBounds]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testFractionalSelectionExpandsToWholePixelBounds]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testInvalidScreenOrImageSizeIsRejected]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testInvalidScreenOrImageSizeIsRejected]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testLocalCoordinatesWorkWithoutSecondaryScreenOrigin]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testLocalCoordinatesWorkWithoutSecondaryScreenOrigin]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testOnePixelCropIsRejected]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testOnePixelCropIsRejected]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testRetinaSelectionScalesAndFlipsVerticalAxis]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testRetinaSelectionScalesAndFlipsVerticalAxis]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testSelectionCrossingScreenEdgesIsClipped]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testSelectionCrossingScreenEdgesIsClipped]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testSelectionEntirelyOutsideScreenIsRejected]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testSelectionEntirelyOutsideScreenIsRejected]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testZeroSizeSelectionIsRejected]' started.
+Test Case '-[MacScreenTranslatorTests.ScreenshotGeometryTests testZeroSizeSelectionIsRejected]' passed (0.000 seconds).
+Test Suite 'ScreenshotGeometryTests' passed at 2026-10-22 17:55:06.285.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ShortcutFormatterTests' started at 2026-10-22 17:55:06.285.
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testDefaultCaptureShortcut]' started.
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testDefaultCaptureShortcut]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testDigitWithoutModifiers]' started.
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testDigitWithoutModifiers]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testModifierSymbolsHaveStableDisplayOrder]' started.
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testModifierSymbolsHaveStableDisplayOrder]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testUnknownKeyCodeHasReadableFallback]' started.
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testUnknownKeyCodeHasReadableFallback]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testUnrelatedModifierBitsDoNotAppear]' started.
+Test Case '-[MacScreenTranslatorTests.ShortcutFormatterTests testUnrelatedModifierBitsDoNotAppear]' passed (0.000 seconds).
+Test Suite 'ShortcutFormatterTests' passed at 2026-10-22 17:55:06.285.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'TranslationRequestTests' started at 2026-10-22 17:55:06.285.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testEditedSourceCannotGenerateLearningFromOldTranslation]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testEditedSourceCannotGenerateLearningFromOldTranslation]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testEditingSourceWhileRequestRunsRejectsMismatchedResult]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testEditingSourceWhileRequestRunsRejectsMismatchedResult]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testMissingModelFailsBeforeCallingService]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testMissingModelFailsBeforeCallingService]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testNewTranslationReplacesPendingRequestAndRejectsLateSuccess]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testNewTranslationReplacesPendingRequestAndRejectsLateSuccess]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testOldFailureCannotStopReplacementTranslation]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testOldFailureCannotStopReplacementTranslation]' passed (0.001 seconds).
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testPreparingCaptureImmediatelyCancelsPendingRequestAndRejectsLateFailure]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testPreparingCaptureImmediatelyCancelsPendingRequestAndRejectsLateFailure]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testRetryUsesEditedSource]' started.
+Test Case '-[MacScreenTranslatorTests.TranslationRequestTests testRetryUsesEditedSource]' passed (0.000 seconds).
+Test Suite 'TranslationRequestTests' passed at 2026-10-22 17:55:06.290.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+Test Suite 'VisionModelTests' started at 2026-10-22 17:55:06.290.
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testBuildsMultimodalRequestWithImageAndIndependentModel]' started.
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testBuildsMultimodalRequestWithImageAndIndependentModel]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testCloudRecognitionUsesImageRequestAndParsesResponseWithoutNetwork]' started.
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testCloudRecognitionUsesImageRequestAndParsesResponseWithoutNetwork]' passed (0.003 seconds).
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testParsesTextAndRejectsErrorMalformedResponses]' started.
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testParsesTextAndRejectsErrorMalformedResponses]' passed (0.000 seconds).
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testRejectsMissingKeyModelInvalidEndpointAndOversizeImage]' started.
+Test Case '-[MacScreenTranslatorTests.VisionModelTests testRejectsMissingKeyModelInvalidEndpointAndOversizeImage]' passed (0.002 seconds).
+Test Suite 'VisionModelTests' passed at 2026-10-22 17:55:06.296.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+Test Suite 'MacScreenTranslatorPackageTests.xctest' passed at 2026-10-22 17:55:06.296.
+	 Executed 63 tests, with 0 failures (0 unexpected) in 0.545 (0.550) seconds
+Test Suite 'All tests' passed at 2026-10-22 17:55:06.296.
+	 Executed 63 tests, with 0 failures (0 unexpected) in 0.545 (0.551) seconds
+◇ Test run started.
+↳ Testing Library Version: 1085
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

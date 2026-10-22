@@ -6,29 +6,51 @@ struct ContentView: View {
     let capture: () -> Void
     let recognize: () -> Void
     let setHotkeyEnabled: (Bool) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var settingsShown = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            actionPanel
-            statusRow
-            HStack(spacing: 14) {
-                sourceTextCard
-                textCard(title: "译文", subtitle: store.translation.isEmpty ? "TRANSLATION" : store.targetLanguage.uppercased(), text: store.translation, color: AppTheme.accent)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    header
+                    actionPanel
+                    statusRow
+                    if geometry.size.width >= 720 {
+                        HStack(spacing: 14) {
+                            sourceTextCard
+                            translationCard
+                        }
+                        .frame(height: 240)
+                    } else {
+                        sourceTextCard.frame(height: 240)
+                        translationCard.frame(height: 240)
+                    }
+                    learningCard.frame(height: 170)
+                }
+                .padding(20)
+                .frame(maxWidth: 1100)
+                .frame(maxWidth: .infinity)
             }
-            .frame(height: 240)
-            learningCard
         }
-        .padding(24)
-        .frame(width: 860, height: 790)
+        .frame(minWidth: 520, minHeight: 480)
         .foregroundStyle(AppTheme.cocoa)
         .tint(AppTheme.accent)
         .background(AppTheme.background)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.state)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.isLoadingLearningNote)
         .sheet(isPresented: $settingsShown) { SettingsView(setHotkeyEnabled: setHotkeyEnabled).environmentObject(store) }
         .onReceive(NotificationCenter.default.publisher(for: .openTranslationSettings)) { _ in
             settingsShown = true
         }
+    }
+
+    private var isTranslationStale: Bool { !store.translation.isEmpty && !store.hasCurrentTranslation }
+
+    private var translationCard: some View {
+        textCard(title: "译文", subtitle: store.translation.isEmpty ? store.targetLanguage :
+                    (store.hasCurrentTranslation ? store.targetLanguage : "待更新"),
+                 text: store.translation, color: AppTheme.accent)
     }
 
     private var learningCard: some View {
@@ -46,8 +68,8 @@ struct ContentView: View {
                 Spacer()
                 if store.isLoadingLearningNote {
                     ProgressView().controlSize(.small)
-                } else if store.learningNote == nil && store.canLearnCurrentText && !store.translation.isEmpty {
-                    Button("理解这句话") { store.loadLearningNote() }
+                } else if store.learningNote == nil && store.canLearnCurrentText && store.hasCurrentTranslation {
+                    Button(store.learningError == nil ? "理解这句话" : "重试学习") { store.loadLearningNote() }
                         .buttonStyle(WarmButtonStyle()).tint(AppTheme.accent)
                 }
             }
@@ -58,7 +80,7 @@ struct ContentView: View {
                         if !note.keyPoints.isEmpty { learningSection("表达要点", note.keyPoints, icon: "text.book.closed") }
                         if !note.words.isEmpty { learningSection("重点词汇", note.words, icon: "character.book.closed") }
                     } else {
-                        Text(store.isLoadingLearningNote ? "正在整理这句话…" : "翻译完成后，可以按需理解句意、表达和重点词汇。")
+                        Text(store.learningError ?? (store.isLoadingLearningNote ? "正在整理这句话…" : "翻译完成后，可以按需理解句意、表达和重点词汇。"))
                             .font(.callout).foregroundStyle(AppTheme.secondary)
                     }
                 }
@@ -89,8 +111,8 @@ struct ContentView: View {
             }
             Spacer()
             HStack(spacing: 6) {
-                Circle().fill(store.isTranslating ? AppTheme.accent : AppTheme.success).frame(width: 7, height: 7)
-                Text(store.isTranslating ? "处理中" : "已就绪")
+                Circle().fill(store.isTranslating || store.state == .failed || store.learningError != nil || store.apiKey.isEmpty ? AppTheme.accent : AppTheme.success).frame(width: 7, height: 7)
+                Text(store.isTranslating ? "处理中" : (store.state == .failed || store.learningError != nil ? "需重试" : (store.apiKey.isEmpty ? "待配置" : (isTranslationStale ? "待翻译" : "已就绪"))))
                     .font(.caption.weight(.medium)).foregroundStyle(AppTheme.secondary)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
@@ -100,7 +122,7 @@ struct ContentView: View {
             }
             .buttonStyle(WarmButtonStyle())
             Button { visibilityController.hideToMenuBar() } label: {
-                Image(systemName: "menubar.arrow.up.rectangle")
+                Image(systemName: "menubar.arrow.up.rectangle").accessibilityLabel("隐藏到菜单栏")
             }
             .buttonStyle(.borderless)
             .help("隐藏到菜单栏")
@@ -112,23 +134,24 @@ struct ContentView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("开始翻译").font(.headline)
-                    Text("选择一种方式把文字带进工作区").font(.caption).foregroundStyle(AppTheme.secondary)
+                    Text("输入原文，或从屏幕与剪贴板获取文字").font(.caption).foregroundStyle(AppTheme.secondary)
                 }
                 Spacer()
-                Text("⌘↩︎ 翻译输入内容").font(.caption).foregroundStyle(AppTheme.secondary)
+                Text(store.provider.title).font(.caption.weight(.medium)).foregroundStyle(AppTheme.accent)
             }
-            HStack(spacing: 12) {
-                actionButton("框选翻译", detail: store.captureShortcutTitle, icon: "viewfinder", tint: AppTheme.accent) {
-                    capture()
-                }
-                actionButton("翻译剪贴板", detail: store.clipboardShortcutTitle, icon: "doc.on.clipboard", tint: AppTheme.caramel) { store.translateClipboard() }
-                actionButton("仅 OCR", detail: "自动复制", icon: "text.viewfinder", tint: AppTheme.cocoa) {
-                    recognize()
-                }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { actionButtons }
+                VStack(spacing: 10) { actionButtons }
             }
         }
         .padding(17)
         .warmCard()
+    }
+
+    @ViewBuilder private var actionButtons: some View {
+        actionButton("框选翻译", detail: store.captureShortcutTitle, icon: "viewfinder", tint: AppTheme.accent) { capture() }
+        actionButton("翻译剪贴板", detail: store.clipboardShortcutTitle, icon: "doc.on.clipboard", tint: AppTheme.caramel) { store.translateClipboard() }
+        actionButton("仅识别", detail: "框选文字 · 自动复制", icon: "text.viewfinder", tint: AppTheme.cocoa) { recognize() }
     }
 
     private func actionButton(_ title: String, detail: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -143,7 +166,7 @@ struct ContentView: View {
                     Text(detail).font(.caption2).foregroundStyle(AppTheme.secondary).lineLimit(1)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
             .padding(13)
         }
         .buttonStyle(WarmActionStyle())
@@ -154,7 +177,7 @@ struct ContentView: View {
         HStack(spacing: 9) {
             Image(systemName: statusIcon)
                 .foregroundStyle(statusColor)
-            Text(store.status).font(.callout).foregroundStyle(AppTheme.secondary).lineLimit(2)
+            Text(isTranslationStale && !store.isTranslating && store.state == .succeeded ? "原文已修改，点击“翻译原文”更新译文。" : store.status).contentTransition(.opacity).font(.callout).foregroundStyle(store.state == .failed ? AppTheme.accent : AppTheme.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
             if store.isTranslating {
                 ProgressView().controlSize(.small)
@@ -167,20 +190,27 @@ struct ContentView: View {
             } else if !store.source.isEmpty && store.state == .failed {
                 Button("重试") { store.retryLastTranslation() }.buttonStyle(WarmButtonStyle())
             }
+            if store.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.state == .failed || store.learningError != nil {
+                Button("检查设置") { settingsShown = true }.buttonStyle(WarmButtonStyle())
+            }
         }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(statusColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var statusIcon: String {
         if store.isTranslating { return "arrow.triangle.2.circlepath" }
+        if store.learningError != nil { return "exclamationmark.triangle.fill" }
+        if isTranslationStale && store.state == .succeeded { return "pencil" }
         if store.state == .succeeded { return "checkmark.circle.fill" }
         if store.state == .failed { return "exclamationmark.triangle.fill" }
         return "info.circle.fill"
     }
 
     private var statusColor: Color {
-        if store.isTranslating { return AppTheme.accent }
+        if store.isTranslating || store.learningError != nil { return AppTheme.accent }
+        if isTranslationStale && store.state == .succeeded { return AppTheme.caramel }
         if store.state == .succeeded { return AppTheme.success }
         if store.state == .failed { return AppTheme.accent }
         return .secondary
@@ -193,9 +223,14 @@ struct ContentView: View {
                 Text(title).font(.headline)
                 Spacer()
                 Text(subtitle).font(.caption2.weight(.semibold)).foregroundStyle(AppTheme.secondary)
+                if !text.isEmpty { CopyTextButton(text: text) }
             }
             ZStack(alignment: .topLeading) {
                 ScrollView {
+                    if !store.hasCurrentTranslation && !text.isEmpty {
+                        Label("原文已修改，请重新翻译", systemImage: "pencil.circle")
+                            .font(.caption).foregroundStyle(AppTheme.accent).padding(.top, 10)
+                    }
                     Text(text.isEmpty ? "" : text)
                         .font(.system(size: 16))
                         .lineSpacing(3)
@@ -209,7 +244,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Image(systemName: title == "识别原文" ? "text.viewfinder" : "character.bubble")
                             .foregroundStyle(color.opacity(0.65))
-                        Text(title == "识别原文" ? "框选区域或输入文字后，原文会显示在这里" : "翻译结果会显示在这里")
+                        Text(store.isTranslating ? "正在处理，请稍候…" : "翻译结果会显示在这里")
                             .font(.callout).foregroundStyle(AppTheme.secondary)
                     }
                     .padding(18)
@@ -226,12 +261,14 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Circle().fill(AppTheme.caramel).frame(width: 8, height: 8)
-                Text("识别原文").font(.headline)
+                Text("原文").font(.headline)
                 Spacer()
-                Text("SOURCE").font(.caption2.weight(.semibold)).foregroundStyle(AppTheme.secondary)
+                Text("\(store.source.count) 字").font(.caption).foregroundStyle(AppTheme.secondary)
             }
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $store.source)
+                    .accessibilityLabel("原文输入")
+                    .disabled(store.state == .recognizing)
                     .font(.system(size: 16))
                     .scrollContentBackground(.hidden)
                     .padding(8)
@@ -248,8 +285,14 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
             }
-            Text("可直接修改识别结果；按 ⌘↩︎ 翻译")
-                .font(.caption).foregroundStyle(AppTheme.secondary)
+            HStack {
+                Text("可编辑原文 · ⌘↩︎ 翻译")
+                    .font(.caption).foregroundStyle(AppTheme.secondary)
+                Spacer()
+                Button("翻译原文") { store.translateInput(store.source) }
+                    .buttonStyle(WarmButtonStyle(prominent: true))
+                    .disabled(store.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -262,6 +305,8 @@ private struct SettingsView: View {
     @EnvironmentObject var store: TranslationStore
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: SettingsField?
+    @State private var saveFeedback = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum SettingsField { case apiKey, model }
 
@@ -275,7 +320,7 @@ private struct SettingsView: View {
                 }
                 Spacer()
             }
-            .padding(24)
+            .padding(20)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -288,18 +333,45 @@ private struct SettingsView: View {
                         .onChange(of: store.providerRaw) { _, rawValue in
                             store.provider = APIProvider(rawValue: rawValue) ?? .deepSeek
                         }
-                        SecureField("\(store.provider.title) API Key", text: $store.apiKey)
+                        Text("\(store.provider.title) API Key").font(.caption.weight(.medium))
+                        SecureField("输入 API Key", text: $store.apiKey)
                             .focused($focusedField, equals: .apiKey)
                         if let error = store.apiKeyStorageError {
                             Text(error).font(.caption).foregroundStyle(.red)
                         }
-                        TextField("模型", text: $store.model)
+                        Text("翻译模型").font(.caption.weight(.medium))
+                        TextField("模型名称", text: $store.model)
                             .focused($focusedField, equals: .model)
                         HStack {
                             Text("密钥保存在 macOS 钥匙串中")
                                 .font(.caption).foregroundStyle(AppTheme.secondary)
                             Spacer()
-                            Button("保存密钥") { store.saveAPIKey() }.buttonStyle(WarmButtonStyle())
+                            Button("保存密钥") { saveFeedback = store.saveAPIKey() ? "翻译密钥已保存" : "保存失败，请检查上方提示" }.buttonStyle(WarmButtonStyle())
+                        }
+                    }
+                    settingsSection("图片识别", icon: "text.viewfinder") {
+                        Picker("识别模式", selection: $store.imageRecognitionModeRaw) {
+                            ForEach(ImageRecognitionMode.allCases) { mode in
+                                Text(mode.title).tag(mode.rawValue)
+                            }
+                        }
+                        if store.imageRecognitionMode == .local {
+                            Text("使用 macOS 自带 OCR，图片在本机识别；原文发送给翻译服务。")
+                                .font(.caption).foregroundStyle(AppTheme.secondary)
+                        } else {
+                            Text("识别服务 Base URL").font(.caption.weight(.medium))
+                            TextField("https://api.openai.com/v1", text: $store.visionBaseURL)
+                            Text("图片识别模型").font(.caption.weight(.medium))
+                            TextField("支持图片输入的模型名称", text: $store.visionModel)
+                            Text("图片识别 API Key").font(.caption.weight(.medium))
+                            SecureField("输入识别服务密钥", text: $store.visionAPIKey)
+                            if let error = store.visionKeyStorageError {
+                                Text(error).font(.caption).foregroundStyle(.red)
+                            }
+                            Text("图片会发送至此服务，可能产生费用。需支持 Chat Completions 图片输入；模型由你指定。识别原文后，再使用上方翻译服务。更换服务时请更换对应密钥。")
+                                .font(.caption).foregroundStyle(AppTheme.secondary)
+                            Button("保存识别密钥") { saveFeedback = store.saveVisionAPIKey() ? "识别密钥已保存" : "保存失败，请检查上方提示" }
+                                .buttonStyle(WarmButtonStyle())
                         }
                     }
                     settingsSection("语言偏好", icon: "character.bubble") {
@@ -350,24 +422,33 @@ private struct SettingsView: View {
                 .padding(.bottom, 18)
             }
             HStack {
-                Text("按你的习惯，轻松翻译")
+                Text(saveFeedback.isEmpty ? "语言与快捷键修改后立即生效" : saveFeedback)
                     .font(.caption).foregroundStyle(AppTheme.secondary)
                 Spacer()
-                Button("完成") { store.saveAPIKey(); dismiss() }
+                Button("完成") {
+                    let translationSaved = store.saveAPIKey()
+                    let visionSaved = store.saveVisionAPIKey()
+                    if translationSaved && visionSaved { dismiss() }
+                    else { saveFeedback = "密钥未保存，请检查提示后重试" }
+                }
                     .buttonStyle(WarmButtonStyle(prominent: true))
                     .keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, 24).padding(.vertical, 16)
             .background(AppTheme.surface)
         }
-        .frame(width: 540, height: 630)
+        .frame(width: 500, height: 560)
         .foregroundStyle(AppTheme.cocoa)
         .tint(AppTheme.accent)
         .background(AppTheme.background)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.imageRecognitionModeRaw)
         .onAppear {
             setHotkeyEnabled(false)
             NSApp.activate(ignoringOtherApps: true)
-            DispatchQueue.main.async { focusedField = .apiKey }
+            DispatchQueue.main.async {
+                focusedField = nil
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
         }
         .onDisappear { setHotkeyEnabled(true) }
     }
@@ -391,5 +472,31 @@ private struct SettingsView: View {
             ShortcutRecorder(title: title, onRecord: onChange)
                 .frame(width: 180, height: 28)
         }
+    }
+}
+
+struct CopyTextButton: View {
+    let text: String
+    @State private var copied = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var resetTask: Task<Void, Never>?
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            copied = NSPasteboard.general.setString(text, forType: .string)
+            resetTask?.cancel()
+            resetTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                copied = false
+            }
+        } label: {
+            Label(copied ? "已复制" : "复制译文", systemImage: copied ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(WarmButtonStyle())
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: copied)
+        .onChange(of: text) { _, _ in copied = false; resetTask?.cancel() }
+        .onDisappear { resetTask?.cancel() }
     }
 }

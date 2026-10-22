@@ -70,6 +70,7 @@ extension View {
 struct WarmActionStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -77,13 +78,17 @@ struct WarmActionStyle: ButtonStyle {
                         in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(AppTheme.accent.opacity(hovered ? 0.35 : 0.12)))
             .opacity(isEnabled ? 1 : 0.5)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
             .onHover { hovered = $0 }
-            .animation(.easeOut(duration: 0.15), value: hovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 
 struct WarmButtonStyle: ButtonStyle {
     var prominent = false
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -95,6 +100,9 @@ struct WarmButtonStyle: ButtonStyle {
                         in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(prominent ? Color.clear : AppTheme.border))
-            .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.75 : (hovered ? 0.88 : 1)) : 0.45)
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hovered)
     }
 }

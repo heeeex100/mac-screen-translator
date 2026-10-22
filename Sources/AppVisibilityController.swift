@@ -31,10 +31,12 @@ final class AppVisibilityController: ObservableObject {
         if mainWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 860, height: 790),
-                styleMask: [.titled, .closable, .miniaturizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
+            window.minSize = NSSize(width: 560, height: 620)
+            window.setFrameAutosaveName("translatorMainWindow")
             window.title = "多多翻译"
             window.identifier = NSUserInterfaceItemIdentifier("translatorMainWindow")
             window.isReleasedWhenClosed = false

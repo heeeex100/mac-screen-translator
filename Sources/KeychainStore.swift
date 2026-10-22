@@ -15,6 +15,9 @@ enum KeychainStore {
         try save(value, account: account(for: provider))
     }
 
+    static func loadVisionAPIKey() throws -> String? { try load(account: "vision-api-key") }
+    static func saveVisionAPIKey(_ value: String) throws { try save(value, account: "vision-api-key") }
+
     // 旧版本只保存 DeepSeek Key，保留无参数 API 方便迁移和兼容。
     static func loadAPIKey() throws -> String? { try load(account: legacyAccount) }
     static func saveAPIKey(_ value: String) throws { try save(value, account: legacyAccount) }

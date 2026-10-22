@@ -47,18 +47,26 @@ final class TranslationStore: ObservableObject {
         didSet { if source != oldValue { invalidateLearningNote() } }
     }
     @Published var translation = "" {
-        didSet { if translation != oldValue { invalidateLearningNote() } }
+        didSet { if translation != oldValue { translatedSource = source; invalidateLearningNote() } }
     }
+    private var translatedSource = ""
+    var hasCurrentTranslation: Bool { !translation.isEmpty && translatedSource == source }
+    @Published var learningError: String?
     @Published var learningNote: LearningNote?
     @Published var isLoadingLearningNote = false
-    @Published var status = "准备就绪。使用下方按钮或菜单栏快捷键框选翻译。"
+    @Published var status = "准备就绪。输入原文，或使用上方按钮获取文字。"
     @Published var isTranslating = false
     @Published var apiKey: String
     @Published var apiKeyStorageError: String?
+    @Published var visionAPIKey = ""
+    @Published var visionKeyStorageError: String?
     @Published var shortcutError: String?
     var registerShortcut: ((HotKeyAction, HotKeyShortcut) -> String?)?
     typealias LearningOperation = (String, String, String, String, APIProvider) async throws -> LearningNote
     typealias TranslationOperation = (String, String, String, String, APIProvider) async throws -> String
+    typealias ImageRecognitionOperation = (CGImage, ImageRecognitionConfiguration) async throws -> String
+    private let recognitionConfiguration: (() -> ImageRecognitionConfiguration)?
+    private let imageRecognitionOperation: ImageRecognitionOperation
     private let translationOperation: TranslationOperation
     @Published private(set) var activeCaptureMode: CaptureOperation?
     private let learningOperation: LearningOperation
@@ -68,6 +76,11 @@ final class TranslationStore: ObservableObject {
     @AppStorage("apiProvider") var providerRaw = APIProvider.deepSeek.rawValue
     @AppStorage("deepseekModel") var model = "deepseek-flash"
     @AppStorage("targetLanguage") var targetLanguage = "中文（简体）"
+    @AppStorage("imageRecognitionMode") var imageRecognitionModeRaw = ImageRecognitionMode.local.rawValue
+    @AppStorage("visionBaseURL") var visionBaseURL = "https://api.openai.com/v1"
+    @AppStorage("visionModel") var visionModel = "gpt-4o-mini"
+    var imageRecognitionMode: ImageRecognitionMode { ImageRecognitionMode(rawValue: imageRecognitionModeRaw) ?? .local }
+
     @AppStorage("recognitionLanguage") var recognitionLanguage = "自动识别"
     @AppStorage("captureHotKeyCode") private var captureHotKeyCode = Int(kVK_ANSI_T)
     @AppStorage("captureHotKeyModifiers") private var captureHotKeyModifiers = Int(controlKey | shiftKey)
@@ -75,7 +88,13 @@ final class TranslationStore: ObservableObject {
     @AppStorage("clipboardHotKeyModifiers") private var clipboardHotKeyModifiers = Int(controlKey | shiftKey)
 
     init(apiKey: String? = nil, learningOperation: LearningOperation? = nil,
-         translationOperation: TranslationOperation? = nil) {
+         translationOperation: TranslationOperation? = nil,
+         imageRecognitionOperation: ImageRecognitionOperation? = nil,
+         recognitionConfiguration: (() -> ImageRecognitionConfiguration)? = nil) {
+        self.recognitionConfiguration = recognitionConfiguration
+        self.imageRecognitionOperation = imageRecognitionOperation ?? { image, configuration in
+            try await ImageRecognition.recognize(image, configuration: configuration)
+        }
         self.translationOperation = translationOperation ?? { text, key, model, language, provider in
             try await Self.callChatCompletion(text: text, apiKey: key, model: model, targetLanguage: language, provider: provider)
         }
@@ -84,6 +103,8 @@ final class TranslationStore: ObservableObject {
         }
         // 注入密钥和请求以便测试异步流程，不访问钥匙串或真实 API。
         if let apiKey { self.apiKey = apiKey; return }
+        do { visionAPIKey = try KeychainStore.loadVisionAPIKey() ?? "" }
+        catch { visionKeyStorageError = error.localizedDescription }
         AppLogger.shared.info("应用启动")
         let provider = APIProvider(rawValue: UserDefaults.standard.string(forKey: "apiProvider") ?? "deepseek") ?? .deepSeek
         // 首次升级时，把旧版本 UserDefaults 中的明文 Key 一次性迁移到钥匙串。
@@ -135,15 +156,27 @@ final class TranslationStore: ObservableObject {
         (UInt32(clipboardHotKeyCode), UInt32(clipboardHotKeyModifiers))
     }
 
-    func saveAPIKey() {
+    @discardableResult
+    func saveAPIKey() -> Bool {
         do {
             try KeychainStore.saveAPIKey(apiKey, provider: provider)
             apiKeyStorageError = nil
-            AppLogger.shared.info("API Key 已保存（长度：\(apiKey.count)）")
+            AppLogger.shared.info("API Key 已保存")
+            return true
         } catch {
             apiKeyStorageError = error.localizedDescription
             AppLogger.shared.error("保存 API Key 失败：\(error.localizedDescription)")
+            return false
         }
+    }
+
+    @discardableResult
+    func saveVisionAPIKey() -> Bool {
+        do {
+            try KeychainStore.saveVisionAPIKey(visionAPIKey)
+            visionKeyStorageError = nil
+            return true
+        } catch { visionKeyStorageError = error.localizedDescription; return false }
     }
 
     var logFileURL: URL { AppLogger.shared.fileURL }
@@ -180,77 +213,69 @@ final class TranslationStore: ObservableObject {
     }
 
     func translate(selection: NSRect, on screen: NSScreen) {
-        guard let image = screenshot(selection: selection, screen: screen) else { fail("截图失败，请在系统设置中允许屏幕录制。"); return }
-        source = ""
-        translation = ""
-        learningNote = nil
-        beginRequest(.recognizing, captureMode: .translation)
-        status = "正在识别文字…"
-        let languages = recognitionLanguages()
-        let requestID = activeRequestID
-        activeTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let text = try await Task.detached(priority: .userInitiated) {
-                    try Self.recognize(image: image, languages: languages)
-                }.value
-                guard !Task.isCancelled, self.activeRequestID == requestID else { return }
-                guard !text.isEmpty else {
-                    AppLogger.shared.error("OCR 失败：Vision 未识别到文字（框选翻译流程）")
-                    throw TranslationError.message("没有识别到文字。")
-                }
-                self.source = text
-                guard !self.apiKey.isEmpty else {
-                    self.status = "已识别原文；请先在设置中填写 \(self.provider.title) API Key 以翻译。"
-                    self.isTranslating = false
-                    self.state = .idle
-                    return
-                }
-                guard self.activeRequestID == requestID else { return }
-                self.state = .translating
-                self.status = "正在翻译…"
-                try await self.translateRecognizedText(text, requestID: requestID)
-            } catch is CancellationError {
-                guard self.activeRequestID == requestID else { return }
-                self.cancelled()
-            } catch {
-                guard self.activeRequestID == requestID else { return }
-                self.fail(error.localizedDescription)
-            }
+        guard let image = screenshot(selection: selection, screen: screen) else {
+            fail("截图失败，请在系统设置中允许屏幕录制。")
+            return
         }
+        beginImageRecognition(image, translate: true, captureMode: .translation)
     }
 
-    /// 只执行 OCR，不访问翻译服务，并自动把识别结果复制到剪贴板。
+    /// 只识别文字，使用当前图片识别模式，并自动复制结果。
     func recognize(selection: NSRect, on screen: NSScreen) {
         guard let image = screenshot(selection: selection, screen: screen) else {
             fail("截图失败，请在系统设置中允许屏幕录制。")
             return
         }
+        beginImageRecognition(image, translate: false, captureMode: .ocr)
+    }
+
+    @discardableResult
+    func translateImage(_ image: CGImage) -> Task<Void, Never> {
+        beginImageRecognition(image, translate: true)
+    }
+
+    @discardableResult
+    private func beginImageRecognition(_ image: CGImage, translate: Bool,
+                                       captureMode: CaptureOperation? = nil) -> Task<Void, Never> {
+        beginRequest(.recognizing, captureMode: captureMode)
         source = ""
         translation = ""
-        learningNote = nil
-        beginRequest(.recognizing, captureMode: .ocr)
-        status = "正在识别文字…"
-        let languages = recognitionLanguages()
+        let configuration = recognitionConfiguration?() ?? (imageRecognitionMode == .local
+            ? .local(languages: recognitionLanguages())
+            : .model(VisionModelSettings(baseURL: visionBaseURL, model: visionModel, apiKey: visionAPIKey)))
+        switch configuration {
+        case .local: status = "正在使用本地 OCR 识别文字…"
+        case .model: status = "正在使用大模型识别图片文字…"
+        }
         let requestID = activeRequestID
-        activeTask = Task { [weak self] in
+        let operation = imageRecognitionOperation
+        let translationSettings = (apiKey, model, targetLanguage, provider)
+        let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let text = try await Task.detached(priority: .userInitiated) {
-                    try Self.recognize(image: image, languages: languages)
-                }.value
-                guard !Task.isCancelled, self.activeRequestID == requestID else { return }
-                guard !text.isEmpty else {
-                    AppLogger.shared.error("OCR 失败：Vision 未识别到文字（仅 OCR 流程）")
-                    throw TranslationError.message("没有识别到文字。")
-                }
+                let text = try await operation(image, configuration).trimmingCharacters(in: .whitespacesAndNewlines)
+                try Task.checkCancellation()
+                guard self.activeRequestID == requestID else { return }
+                guard !text.isEmpty else { throw TranslationError.message("没有识别到文字。") }
                 self.source = text
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-                self.status = "OCR 完成，结果已复制"
-                self.isTranslating = false
-                self.state = .succeeded
-                NotificationCenter.default.post(name: .ocrCompleted, object: OCRDisplayResult(text: text))
+                if !translate {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    self.status = "文字识别完成，结果已复制"
+                    self.isTranslating = false
+                    self.state = .succeeded
+                    NotificationCenter.default.post(name: .ocrCompleted, object: OCRDisplayResult(text: text))
+                    return
+                }
+                guard !translationSettings.0.isEmpty else {
+                    self.status = "已识别原文；请先在设置中填写 \(translationSettings.3.title) API Key 以翻译。"
+                    self.isTranslating = false
+                    self.state = .idle
+                    return
+                }
+                self.state = .translating
+                self.status = "正在翻译图片文字…"
+                try await self.translateRecognizedText(text, requestID: requestID, settings: translationSettings)
             } catch is CancellationError {
                 guard self.activeRequestID == requestID else { return }
                 self.cancelled()
@@ -259,6 +284,8 @@ final class TranslationStore: ObservableObject {
                 self.fail(error.localizedDescription)
             }
         }
+        activeTask = task
+        return task
     }
 
     @discardableResult
@@ -290,13 +317,13 @@ final class TranslationStore: ObservableObject {
         return task
     }
 
-    func translateClipboard() {
-        guard let text = NSPasteboard.general.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            status = "剪贴板中没有可翻译的文字。"
-            return
+    @discardableResult
+    func translateClipboard(from pasteboard: NSPasteboard = .general) -> Task<Void, Never>? {
+        switch ClipboardInput.read(from: pasteboard) {
+        case .image(let image): return translateImage(image)
+        case .text(let text): return beginTextTranslation(text, status: "正在翻译剪贴板文字…")
+        case .empty: status = "剪贴板中没有可翻译的文字或图片。"; return nil
         }
-        _ = beginTextTranslation(text, status: "正在翻译剪贴板文字…")
     }
 
     /// 立即停止旧任务，允许框选而不等待旧服务请求完成。
@@ -315,20 +342,11 @@ final class TranslationStore: ObservableObject {
     }
 
     func retryLastTranslation() {
-        guard !isTranslating, let text = lastRequestText, !apiKey.isEmpty else { return }
-        beginRequest(.translating)
-        status = "正在重试…"
-        let requestID = activeRequestID
-        activeTask = Task { [weak self] in
-            guard let self else { return }
-            do { try await self.translateRecognizedText(text, requestID: requestID) }
-            catch is CancellationError { guard self.activeRequestID == requestID else { return }; self.cancelled() }
-            catch { guard self.activeRequestID == requestID else { return }; self.fail(error.localizedDescription) }
-        }
+        guard !isTranslating else { return }
+        translateInput(source)
     }
 
     private var activeTask: Task<Void, Never>?
-    private var lastRequestText: String?
     private var activeRequestID = UUID()
 
     private func invalidateActiveTranslation() {
@@ -341,7 +359,6 @@ final class TranslationStore: ObservableObject {
         invalidateActiveTranslation()
         invalidateLearningNote()
         activeCaptureMode = captureMode
-        lastRequestText = nil
         state = newState
         isTranslating = newState == .recognizing || newState == .translating
     }
@@ -360,12 +377,21 @@ final class TranslationStore: ObservableObject {
         AppLogger.shared.error("翻译流程失败：\(message)")
     }
 
-    private func translateRecognizedText(_ text: String, requestID: UUID) async throws {
-        lastRequestText = text
+    private func translateRecognizedText(_ text: String, requestID: UUID,
+                                         settings: (String, String, String, APIProvider)? = nil) async throws {
         AppLogger.shared.info("开始翻译：原文长度 \(text.count)，模型 \(model)，目标语言 \(targetLanguage)")
-        let result = try await translationOperation(text, apiKey, model, targetLanguage, provider)
+        let selected = settings ?? (apiKey, model, targetLanguage, provider)
+        guard !selected.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw TranslationError.message("请在设置中填写翻译模型名称。")
+        }
+        let result = try await translationOperation(text, selected.0, selected.1, selected.2, selected.3)
         try Task.checkCancellation()
         guard activeRequestID == requestID else { return }
+        guard source == text else {
+            cancelled()
+            status = "原文已修改，请重新翻译。"
+            return
+        }
         translation = result
         status = "翻译完成"
         AppLogger.shared.info("翻译完成：译文长度 \(result.count)")
@@ -385,13 +411,20 @@ final class TranslationStore: ObservableObject {
     private func invalidateLearningNote() {
         learningTask.cancel()
         learningNote = nil
+        learningError = nil
         isLoadingLearningNote = false
     }
 
     @discardableResult
     func loadLearningNote() -> Task<Void, Never>? {
-        guard canLearnCurrentText, !isTranslating, !isLoadingLearningNote, !translation.isEmpty else { return nil }
+        guard canLearnCurrentText, hasCurrentTranslation, !isTranslating, !isLoadingLearningNote, !translation.isEmpty else { return nil }
         guard !apiKey.isEmpty else { status = "请先在设置中填写 \(provider.title) API Key。"; return nil }
+        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            learningError = "请在设置中填写翻译模型名称。"
+            status = learningError!
+            return nil
+        }
+        learningError = nil
         isLoadingLearningNote = true
         let text = source
         let translated = translation
@@ -406,7 +439,7 @@ final class TranslationStore: ObservableObject {
             self.isLoadingLearningNote = false
             switch result {
             case .success(let note): self.learningNote = note
-            case .failure(let error): self.status = error.localizedDescription
+            case .failure(let error): self.learningError = error.localizedDescription; self.status = error.localizedDescription
             }
         })
     }
@@ -433,24 +466,6 @@ final class TranslationStore: ObservableObject {
         }
         AppLogger.shared.info("截图完成：像素尺寸 \(result.width)x\(result.height)")
         return result
-    }
-
-    private nonisolated static func recognize(image: CGImage, languages: [String]) throws -> String {
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = languages
-        request.usesLanguageCorrection = true
-        let handler = VNImageRequestHandler(cgImage: image)
-        try handler.perform([request])
-        return formatRecognizedText(request.results ?? [])
-    }
-
-    private nonisolated static func formatRecognizedText(_ observations: [VNRecognizedTextObservation]) -> String {
-        let items = observations.compactMap { observation -> OCRTextFormatter.Item? in
-            guard let text = observation.topCandidates(1).first?.string else { return nil }
-            return OCRTextFormatter.Item(text: text, box: observation.boundingBox)
-        }
-        return OCRTextFormatter.format(items)
     }
 
     private func recognitionLanguages() -> [String] {
@@ -579,4 +594,4 @@ enum ShortcutFormatter {
     }
 }
 
-private enum TranslationError: LocalizedError { case message(String); var errorDescription: String? { if case let .message(value) = self { return value }; return nil } }
+enum TranslationError: LocalizedError { case message(String); var errorDescription: String? { if case let .message(value) = self { return value }; return nil } }

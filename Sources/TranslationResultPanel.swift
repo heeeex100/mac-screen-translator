@@ -38,7 +38,7 @@ final class TranslationResultPanelController: NSObject, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         // 在所有桌面空间及全屏应用上都允许显示结果。
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.minSize = NSSize(width: 400, height: 280)
+        panel.minSize = NSSize(width: 480, height: 320)
         panel.delegate = self
         return panel
     }
@@ -63,6 +63,7 @@ private struct FloatingTranslationView: View {
     let result: TranslationDisplayResult
     @ObservedObject var store: TranslationStore
     @State private var learningExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isCurrentResult: Bool {
         !store.isTranslating && result.source == store.source && result.translation == store.translation
@@ -80,6 +81,7 @@ private struct FloatingTranslationView: View {
                         }
                     }
                     Spacer()
+                    CopyTextButton(text: result.translation)
                     if isCurrentResult && store.canLearnCurrentText {
                         Button {
                             learningExpanded.toggle()
@@ -101,7 +103,7 @@ private struct FloatingTranslationView: View {
                     .warmCard(radius: 16)
 
                 if learningExpanded && isCurrentResult {
-                    learningContent
+                    learningContent.transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -120,10 +122,12 @@ private struct FloatingTranslationView: View {
             }
             .padding(18)
         }
-        .frame(minWidth: 480, idealWidth: 520, minHeight: 380, idealHeight: 420)
+        .frame(minWidth: 440, idealWidth: 520, minHeight: 280, idealHeight: 420)
         .foregroundStyle(AppTheme.cocoa)
         .tint(AppTheme.accent)
         .background(AppTheme.background)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: learningExpanded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: store.isLoadingLearningNote)
     }
 
     @ViewBuilder private var learningContent: some View {
@@ -154,7 +158,13 @@ private struct FloatingTranslationView: View {
             }
             .textSelection(.enabled)
         } else {
-            Text("正在准备学习内容…").font(.callout).foregroundStyle(AppTheme.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(store.learningError ?? "点击学习，理解这句话。")
+                    .font(.callout).foregroundStyle(AppTheme.secondary)
+                if store.learningError != nil {
+                    Button("重试学习") { store.loadLearningNote() }.buttonStyle(WarmButtonStyle())
+                }
+            }
         }
     }
 

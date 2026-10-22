@@ -67,4 +67,52 @@ final class TranslationRequestTests: XCTestCase {
         await current?.value
         XCTAssertEqual(store.translation, "译文 B")
     }
+    func testEditingSourceWhileRequestRunsRejectsMismatchedResult() async {
+        let gate = Gate()
+        let store = TranslationStore(apiKey: "test", translationOperation: { _, _, _, _, _ in try await gate.run() })
+        let task = store.translateInput("Original sentence")
+        await fulfillment(of: [gate.started], timeout: 2)
+        store.source = "Edited sentence"
+        gate.continuation?.resume(returning: "旧原文的译文")
+        await task?.value
+        XCTAssertTrue(store.translation.isEmpty)
+        XCTAssertFalse(store.isTranslating)
+        XCTAssertEqual(store.status, "原文已修改，请重新翻译。")
+    }
+
+    func testRetryUsesEditedSource() async {
+        var inputs: [String] = []
+        let store = TranslationStore(apiKey: "test", translationOperation: { text, _, _, _, _ in
+            inputs.append(text)
+            throw TranslationError.message("暂时不可用")
+        })
+        await store.translateInput("Original")?.value
+        store.source = "Edited"
+        store.retryLastTranslation()
+        for _ in 0..<20 where inputs.count < 2 { await Task.yield() }
+        XCTAssertEqual(inputs, ["Original", "Edited"])
+    }
+
+    func testEditedSourceCannotGenerateLearningFromOldTranslation() async {
+        let store = TranslationStore(apiKey: "test", translationOperation: { _, _, _, _, _ in "译文" })
+        await store.translateInput("This sentence is worth learning.")?.value
+        XCTAssertTrue(store.hasCurrentTranslation)
+        store.source = "This is a different sentence."
+        XCTAssertFalse(store.hasCurrentTranslation)
+        XCTAssertNil(store.loadLearningNote())
+    }
+
+    func testMissingModelFailsBeforeCallingService() async {
+        let store = TranslationStore(apiKey: "test", translationOperation: { _, _, _, _, _ in
+            XCTFail("empty model should not reach network operation")
+            return ""
+        })
+        let originalModel = store.model
+        defer { store.model = originalModel }
+        store.model = "  "
+        await store.translateInput("Test sentence")?.value
+        XCTAssertEqual(store.state, .failed)
+        XCTAssertEqual(store.status, "请在设置中填写翻译模型名称。")
+    }
+
 }

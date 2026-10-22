@@ -25,8 +25,8 @@ if ! print -r -- "${IDENTITIES}" | grep -Fq -- "${CODESIGN_IDENTITY}"; then
     exit 1
 fi
 
-swift build -c release --package-path "${PROJECT_DIR}"
-BIN_DIR=$(swift build -c release --package-path "${PROJECT_DIR}" --show-bin-path)
+swift build -c release --package-path "${PROJECT_DIR}" --scratch-path "${PROJECT_DIR}/.build/app"
+BIN_DIR=$(swift build -c release --package-path "${PROJECT_DIR}" --scratch-path "${PROJECT_DIR}/.build/app" --show-bin-path)
 
 # Rename the previous bundle without leaving a second searchable copy.
 LEGACY_APP_BUNDLE="${OUTPUT_DIR}/${EXECUTABLE_NAME}.app"

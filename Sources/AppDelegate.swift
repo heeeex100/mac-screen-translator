@@ -32,7 +32,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         configureGlobalHotkey()
-        checkRequiredPermissions()
         showMainWindow()
     }
 
@@ -41,6 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // 框选中重新激活应用时只前置遮罩，避免主窗口重新出现并被截入图片。
+        if let selectionOverlay {
+            visibilityController.hideMainWindowForCapture()
+            selectionOverlay.makeKeyAndOrderFront(nil)
+            return false
+        }
         // 无论其他面板是否可见，都恢复应用自己持有的主窗口。
         showMainWindow()
         return false
@@ -67,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let captureItem = menu.addItem(withTitle: "", action: #selector(startCapture), keyEquivalent: "")
         captureMenuItem = captureItem
         updateCaptureMenuTitle()
-        menu.addItem(withTitle: "框选 OCR（自动复制）", action: #selector(startOCR), keyEquivalent: "")
+        menu.addItem(withTitle: "框选识别（自动复制）", action: #selector(startOCR), keyEquivalent: "")
         let clipboardItem = menu.addItem(withTitle: "", action: #selector(translateClipboard), keyEquivalent: "")
         clipboardMenuItem = clipboardItem
         updateClipboardMenuTitle()
@@ -190,11 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func checkRequiredPermissions() {
+    private func checkRequiredPermissions() -> Bool {
         // CGDisplayCreateImage 受“屏幕录制”权限保护；OCR 本身不需要额外权限。
         let screenRecordingGranted = CGPreflightScreenCaptureAccess()
 
-        guard !screenRecordingGranted else { return }
+        guard !screenRecordingGranted else { return true }
 
         let alert = NSAlert()
         alert.messageText = "需要系统权限"
@@ -207,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSWorkspace.shared.open(url)
             }
         }
+        return false
     }
 
     typealias CaptureMode = CaptureOperation
@@ -216,6 +222,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 可以防止叠出两个遮罩、要求用户框选两次。
         guard selectionOverlay == nil else {
             AppLogger.shared.info("忽略框选请求：框选面板已经存在")
+            return
+        }
+        guard checkRequiredPermissions() else {
+            store.status = "框选需要屏幕录制权限；授权后重试。也可直接输入文字或翻译剪贴板。"
+            showMainWindow()
             return
         }
         let mouse = NSEvent.mouseLocation
